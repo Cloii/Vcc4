@@ -92,7 +92,9 @@ export default function MapPage() {
     Promise.all([getBuildings(), getPaths()]).then(([b, p]) => {
       setBuildings(b);
       setPaths(p);
-    }).catch(console.error);
+    }).catch(() => {
+      // Server unavailable — map still renders, just without data
+    });
   }, []);
 
   const handleBuildingClick = useCallback((building: any) => {
@@ -193,8 +195,8 @@ export default function MapPage() {
       const result = await getRoute(fromBuilding, toBuilding, accessible);
       setRouteResult(result);
       if (user) logActivity({ action: "route_search", userId: user.id, details: { from: fromBuilding, to: toBuilding } }).catch(() => {});
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      setRouteResult({ found: false, error: e.message });
     } finally {
       setLoadingRoute(false);
     }

@@ -35,7 +35,9 @@ export default function TourDetail() {
       if (user) {
         logActivity({ action: "tour_view", userId: user.id, buildingId, details: { buildingName: b.name } }).catch(() => {});
       }
-    }).catch(console.error).finally(() => setLoading(false));
+    }).catch(() => {
+      // Server unavailable — show empty state gracefully
+    }).finally(() => setLoading(false));
   }, [buildingId, role]);
 
   const handleHotspotClick = (targetPanoId: string) => {
