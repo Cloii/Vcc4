@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import React, { useEffect, useRef } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { logActivity, createSecurityAlert } from "../../lib/api";
 
