@@ -21,7 +21,7 @@ export default function Tours() {
   const [category, setCategory] = useState("all");
 
   useEffect(() => {
-    getBuildings().then(setBuildings).catch(console.error).finally(() => setLoading(false));
+    getBuildings().then(setBuildings).catch(() => {}).finally(() => setLoading(false));
     if (user) logActivity({ action: "tours_page_view", userId: user.id }).catch(() => {});
   }, []);
 

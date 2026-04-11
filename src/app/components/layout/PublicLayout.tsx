@@ -141,7 +141,7 @@ export const PublicLayout: React.FC = () => {
       {/* Footer */}
       <footer className="bg-blue-900 text-blue-200 py-6 mt-auto">
         <div className="max-w-7xl mx-auto px-4 text-center">
-          <p className="text-sm">© 2024 University of Bohol — Virtual Campus Companion</p>
+          <p className="text-sm">© 2025 University of Bohol — Virtual Campus Companion</p>
           <p className="text-xs mt-1 text-blue-400">Tagbilaran City, Bohol, Philippines</p>
         </div>
       </footer>

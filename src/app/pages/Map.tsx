@@ -1,7 +1,6 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { Link } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
 import L from "leaflet";
 import { Route, Accessibility, X, Navigation, Camera, Clock, Info, ChevronDown } from "lucide-react";
 import { getBuildings, getPaths, getRoute, logActivity } from "../lib/api";
@@ -29,7 +28,7 @@ const pathColors: Record<string, string> = {
   closed: "#EF4444",
 };
 
-const createBuildingIcon = (category: string, id: string, selected: boolean) => {
+const createBuildingIcon = (category: string, selected: boolean) => {
   const color = categoryColors[category] || "#1D4ED8";
   const size = selected ? 44 : 36;
   return L.divIcon({
@@ -50,16 +49,14 @@ const createBuildingIcon = (category: string, id: string, selected: boolean) => 
   });
 };
 
-const MapCenterController: React.FC<{ center: [number, number] | null }> = ({ center }) => {
-  const map = useMap();
-  useEffect(() => {
-    if (center) map.setView(center, 18, { animate: true });
-  }, [center, map]);
-  return null;
-};
-
 export default function MapPage() {
   const { user } = useAuth();
+  const mapRef = useRef<L.Map | null>(null);
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const markersRef = useRef<L.Marker[]>([]);
+  const polylinesRef = useRef<L.Polyline[]>([]);
+  const routePolylineRef = useRef<L.Polyline | null>(null);
+
   const [buildings, setBuildings] = useState<any[]>([]);
   const [paths, setPaths] = useState<any[]>([]);
   const [selectedBuilding, setSelectedBuilding] = useState<any>(null);
@@ -68,22 +65,128 @@ export default function MapPage() {
   const [accessible, setAccessible] = useState(false);
   const [routeResult, setRouteResult] = useState<any>(null);
   const [loadingRoute, setLoadingRoute] = useState(false);
-  const [mapCenter, setMapCenter] = useState<[number, number] | null>(null);
   const [filterStatus, setFilterStatus] = useState("all");
   const [panelTab, setPanelTab] = useState<"info" | "route">("info");
 
+  // Initialize Leaflet map
+  useEffect(() => {
+    if (!mapContainerRef.current || mapRef.current) return;
+    const map = L.map(mapContainerRef.current, {
+      center: [9.6546, 123.8547],
+      zoom: 17,
+      zoomControl: true,
+    });
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    }).addTo(map);
+    mapRef.current = map;
+
+    return () => {
+      map.remove();
+      mapRef.current = null;
+    };
+  }, []);
+
+  // Load data
   useEffect(() => {
     Promise.all([getBuildings(), getPaths()]).then(([b, p]) => {
       setBuildings(b);
       setPaths(p);
-    }).catch(console.error);
+    }).catch(() => {
+      // Server unavailable — map still renders, just without data
+    });
   }, []);
 
-  const handleBuildingClick = (building: any) => {
+  const handleBuildingClick = useCallback((building: any) => {
     setSelectedBuilding(building);
-    setMapCenter([building.lat, building.lng]);
+    if (mapRef.current) {
+      mapRef.current.setView([building.lat, building.lng], 18, { animate: true });
+    }
     if (user) logActivity({ action: "building_view", userId: user.id, buildingId: building.id }).catch(() => {});
-  };
+  }, [user]);
+
+  // Update markers when buildings or selectedBuilding changes
+  useEffect(() => {
+    if (!mapRef.current || buildings.length === 0) return;
+    const map = mapRef.current;
+
+    // Remove old markers
+    markersRef.current.forEach(m => m.remove());
+    markersRef.current = [];
+
+    buildings.forEach(b => {
+      const icon = createBuildingIcon(b.category, selectedBuilding?.id === b.id);
+      const marker = L.marker([b.lat, b.lng], { icon })
+        .addTo(map)
+        .bindPopup(`
+          <div style="min-width:180px;padding:4px;">
+            <h3 style="font-weight:700;color:#1f2937;font-size:14px;margin-bottom:4px;">${b.name}</h3>
+            <p style="color:#6b7280;font-size:12px;margin-bottom:8px;text-transform:capitalize;">${b.category}</p>
+            <p style="color:#4b5563;font-size:12px;margin-bottom:12px;line-height:1.5;">${(b.description || "").slice(0, 100)}...</p>
+            <a href="/tours/${b.id}" style="display:inline-flex;align-items:center;gap:4px;background:#1d4ed8;color:white;font-size:12px;font-weight:600;padding:6px 12px;border-radius:8px;text-decoration:none;">
+              📷 Start Tour
+            </a>
+          </div>
+        `);
+      marker.on("click", () => handleBuildingClick(b));
+      markersRef.current.push(marker);
+    });
+  }, [buildings, selectedBuilding, handleBuildingClick]);
+
+  // Update path polylines when paths or filterStatus changes
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const map = mapRef.current;
+
+    // Remove old polylines
+    polylinesRef.current.forEach(p => p.remove());
+    polylinesRef.current = [];
+
+    const filteredPaths = filterStatus === "all" ? paths : paths.filter(p => p.status === filterStatus);
+    filteredPaths.forEach(path => {
+      const from = buildings.find(b => b.id === path.fromBuilding);
+      const to = buildings.find(b => b.id === path.toBuilding);
+      if (!from || !to) return;
+      const polyline = L.polyline(
+        [[from.lat, from.lng], [to.lat, to.lng]],
+        {
+          color: pathColors[path.status] || "#888",
+          weight: 4,
+          opacity: 0.8,
+          dashArray: path.status === "closed" ? "8,6" : path.status === "construction" ? "12,4" : undefined,
+        }
+      ).addTo(map);
+      polylinesRef.current.push(polyline);
+    });
+  }, [paths, buildings, filterStatus]);
+
+  // Update route polyline
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const map = mapRef.current;
+
+    if (routePolylineRef.current) {
+      routePolylineRef.current.remove();
+      routePolylineRef.current = null;
+    }
+
+    if (routeResult?.found && routeResult.path) {
+      const coords: [number, number][] = routeResult.path
+        .map((id: string) => {
+          const b = buildings.find(b => b.id === id);
+          return b ? [b.lat, b.lng] as [number, number] : null;
+        })
+        .filter(Boolean);
+
+      if (coords.length > 1) {
+        routePolylineRef.current = L.polyline(coords, {
+          color: "#1D4ED8",
+          weight: 6,
+          opacity: 0.9,
+        }).addTo(map);
+      }
+    }
+  }, [routeResult, buildings]);
 
   const handleFindRoute = async () => {
     if (!fromBuilding || !toBuilding) return;
@@ -92,19 +195,12 @@ export default function MapPage() {
       const result = await getRoute(fromBuilding, toBuilding, accessible);
       setRouteResult(result);
       if (user) logActivity({ action: "route_search", userId: user.id, details: { from: fromBuilding, to: toBuilding } }).catch(() => {});
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      setRouteResult({ found: false, error: e.message });
     } finally {
       setLoadingRoute(false);
     }
   };
-
-  const routePolylineCoords: [number, number][] = routeResult?.path?.map((id: string) => {
-    const b = buildings.find(b => b.id === id);
-    return b ? [b.lat, b.lng] : null;
-  }).filter(Boolean) || [];
-
-  const filteredPaths = filterStatus === "all" ? paths : paths.filter(p => p.status === filterStatus);
 
   return (
     <div className="flex flex-col lg:flex-row h-[calc(100vh-4rem)]">
@@ -245,68 +341,14 @@ export default function MapPage() {
 
       {/* Map */}
       <div className="flex-1 relative">
-        <MapContainer
-          center={[9.6546, 123.8547]}
-          zoom={17}
-          style={{ height: "100%", width: "100%" }}
-          zoomControl={true}
-        >
-          <MapCenterController center={mapCenter} />
-          <TileLayer
-            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          />
-
-          {/* Path overlays */}
-          {filteredPaths.map(path => {
-            const from = buildings.find(b => b.id === path.fromBuilding);
-            const to = buildings.find(b => b.id === path.toBuilding);
-            if (!from || !to) return null;
-            return (
-              <Polyline
-                key={path.id}
-                positions={[[from.lat, from.lng], [to.lat, to.lng]]}
-                color={pathColors[path.status] || "#888"}
-                weight={4}
-                opacity={0.8}
-                dashArray={path.status === "closed" ? "8,6" : path.status === "construction" ? "12,4" : undefined}
-              />
-            );
-          })}
-
-          {/* Route Polyline */}
-          {routePolylineCoords.length > 1 && (
-            <Polyline positions={routePolylineCoords} color="#1D4ED8" weight={6} opacity={0.9} />
-          )}
-
-          {/* Building Markers */}
-          {buildings.map(b => (
-            <Marker
-              key={b.id}
-              position={[b.lat, b.lng]}
-              icon={createBuildingIcon(b.category, b.id, selectedBuilding?.id === b.id)}
-              eventHandlers={{ click: () => handleBuildingClick(b) }}
-            >
-              <Popup>
-                <div className="p-1 min-w-[180px]">
-                  <h3 className="font-bold text-gray-800 text-sm mb-1">{b.name}</h3>
-                  <p className="text-gray-500 text-xs mb-2 capitalize">{b.category}</p>
-                  <p className="text-gray-600 text-xs mb-3 leading-relaxed">{b.description?.slice(0, 100)}...</p>
-                  <Link to={`/tours/${b.id}`} className="flex items-center gap-1 bg-blue-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg hover:bg-blue-800 transition-colors">
-                    <Camera size={12} /> Start Tour
-                  </Link>
-                </div>
-              </Popup>
-            </Marker>
-          ))}
-        </MapContainer>
+        <div ref={mapContainerRef} style={{ height: "100%", width: "100%" }} />
 
         {/* Selected Building Panel */}
         <AnimatePresence>
           {selectedBuilding && (
             <motion.div
               initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}
-              className="absolute top-4 right-4 bg-white rounded-2xl shadow-xl border border-gray-200 p-4 max-w-xs w-full z-20"
+              className="absolute top-4 right-4 bg-white rounded-2xl shadow-xl border border-gray-200 p-4 max-w-xs w-full z-[1000]"
             >
               <button onClick={() => setSelectedBuilding(null)} className="absolute top-3 right-3 text-gray-400 hover:text-gray-600 p-1">
                 <X size={16} />
