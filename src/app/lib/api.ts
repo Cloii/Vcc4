@@ -247,14 +247,16 @@ export const deleteResource = async (id: string) => {
 };
 
 // Activity Logs
-export const logActivity = (data: { action: string; userId?: string; buildingId?: string; details?: any }) =>
-  supabase.from("activity_logs").insert({
+export const logActivity = async (data: { action: string; userId?: string; buildingId?: string; details?: any }) => {
+  const { error } = await supabase.from("activity_logs").insert({
     id: crypto.randomUUID(),
     action: data.action,
     user_id: data.userId || null,
     building_id: data.buildingId || null,
     details: data.details || null,
   });
+  if (error) throw new Error(error.message);
+};
 export const getActivityLogs = async () => {
   const { data, error } = await supabase.from("activity_logs").select("*").order("timestamp", { ascending: false }).limit(5000);
   return unwrap<any[]>(data, error);
