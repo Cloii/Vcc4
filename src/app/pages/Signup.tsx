@@ -36,10 +36,19 @@ export default function Signup() {
 
       // If staff/admin selected, call serverless role assignment (codes stored as env vars on Vercel).
       if (form.role === "admin" || form.role === "staff") {
-        const accessToken = data.session?.access_token;
+        // Ensure we have a session access token (signUp may return null session depending on email confirmation settings).
+        let accessToken = data.session?.access_token;
         if (!accessToken) {
-          // If email confirmation is enabled, user may not have a session yet.
-          throw new Error("Check your email to confirm your account, then sign in to apply role.");
+          const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
+            email: form.email,
+            password: form.password,
+          });
+          if (signInErr || !signInData.session?.access_token) {
+            throw new Error(
+              "Your account was created, but admin/staff role can only be applied after you can sign in (email confirmation may be enabled). Confirm your email, then sign in and try again."
+            );
+          }
+          accessToken = signInData.session.access_token;
         }
         const res = await fetch("/api/set-role", {
           method: "POST",
