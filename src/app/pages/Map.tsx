@@ -1,9 +1,9 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
-import { Link } from "react-router";
+import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
+import { Link, useNavigate } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
 import L from "leaflet";
-import { Route, Accessibility, X, Navigation, Camera, Clock, Info, ChevronDown } from "lucide-react";
-import { getBuildings, getPaths, getRoute, logActivity } from "../lib/api";
+import { Route, Accessibility, X, Navigation, Camera, Clock, Info, ChevronDown, Search, Compass, Building2 } from "lucide-react";
+import { getBuildings, getPaths, getRoute, logActivity, getPanoramas } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import "leaflet/dist/leaflet.css";
 
@@ -49,8 +49,16 @@ const createBuildingIcon = (category: string, selected: boolean) => {
   });
 };
 
+type MapPanorama = {
+  id: string;
+  name: string;
+  buildingId: string;
+  imageUrl: string;
+};
+
 export default function MapPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const mapRef = useRef<L.Map | null>(null);
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const markersRef = useRef<L.Marker[]>([]);
@@ -59,7 +67,9 @@ export default function MapPage() {
 
   const [buildings, setBuildings] = useState<any[]>([]);
   const [paths, setPaths] = useState<any[]>([]);
+  const [panoramas, setPanoramas] = useState<MapPanorama[]>([]);
   const [selectedBuilding, setSelectedBuilding] = useState<any>(null);
+  const [selectedPano, setSelectedPano] = useState<MapPanorama | null>(null);
   const [fromBuilding, setFromBuilding] = useState("");
   const [toBuilding, setToBuilding] = useState("");
   const [accessible, setAccessible] = useState(false);
@@ -67,6 +77,8 @@ export default function MapPage() {
   const [loadingRoute, setLoadingRoute] = useState(false);
   const [filterStatus, setFilterStatus] = useState("all");
   const [panelTab, setPanelTab] = useState<"info" | "route">("info");
+  const [search, setSearch] = useState("");
+  const [showSearchResults, setShowSearchResults] = useState(false);
 
   // Initialize Leaflet map
   useEffect(() => {
@@ -89,21 +101,94 @@ export default function MapPage() {
 
   // Load data
   useEffect(() => {
-    Promise.all([getBuildings(), getPaths()]).then(([b, p]) => {
+    Promise.all([
+      getBuildings(),
+      getPaths(),
+      getPanoramas().catch(() => []),
+    ]).then(([b, p, panos]) => {
       setBuildings(b);
       setPaths(p);
+      setPanoramas(panos as MapPanorama[]);
     }).catch(() => {
       // Server unavailable — map still renders, just without data
     });
   }, []);
 
+  // Build search results from buildings + panoramas
+  const searchResults = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (q.length < 1) return [] as Array<
+      | { type: "building"; id: string; name: string; subtitle: string; data: any }
+      | { type: "panorama"; id: string; name: string; subtitle: string; data: MapPanorama }
+    >;
+    const buildingsById = new Map(buildings.map((b) => [b.id, b]));
+    const buildingResults = buildings
+      .filter(
+        (b) =>
+          b.name?.toLowerCase().includes(q) ||
+          b.description?.toLowerCase().includes(q) ||
+          b.category?.toLowerCase().includes(q)
+      )
+      .slice(0, 6)
+      .map((b) => ({
+        type: "building" as const,
+        id: b.id,
+        name: b.name,
+        subtitle: `Building · ${b.category}`,
+        data: b,
+      }));
+    const panoResults = panoramas
+      .filter((p) => p.name?.toLowerCase().includes(q))
+      .slice(0, 8)
+      .map((p) => ({
+        type: "panorama" as const,
+        id: p.id,
+        name: p.name,
+        subtitle: `Viewpoint · ${buildingsById.get(p.buildingId)?.name || "Campus"}`,
+        data: p,
+      }));
+    return [...buildingResults, ...panoResults];
+  }, [search, buildings, panoramas]);
+
   const handleBuildingClick = useCallback((building: any) => {
     setSelectedBuilding(building);
+    setSelectedPano(null);
     if (mapRef.current) {
       mapRef.current.setView([building.lat, building.lng], 18, { animate: true });
     }
     if (user) logActivity({ action: "building_view", userId: user.id, buildingId: building.id }).catch(() => {});
   }, [user]);
+
+  const handlePanoSelect = useCallback(
+    (pano: MapPanorama) => {
+      const b = buildings.find((x) => x.id === pano.buildingId);
+      setSelectedPano(pano);
+      setSelectedBuilding(b || null);
+      if (b && mapRef.current) {
+        mapRef.current.setView([b.lat, b.lng], 18, { animate: true });
+      }
+      if (user) {
+        logActivity({
+          action: "pano_search_select",
+          userId: user.id,
+          buildingId: pano.buildingId,
+          details: { panoId: pano.id, panoName: pano.name },
+        }).catch(() => {});
+      }
+    },
+    [buildings, user]
+  );
+
+  const startGuidedTourTo = (panoId: string) => {
+    if (user) {
+      logActivity({
+        action: "guided_tour_start",
+        userId: user.id,
+        details: { toPanoId: panoId },
+      }).catch(() => {});
+    }
+    navigate(`/campus-tour?to=${encodeURIComponent(panoId)}`);
+  };
 
   // Update markers when buildings or selectedBuilding changes
   useEffect(() => {
@@ -210,6 +295,84 @@ export default function MapPage() {
         <div className="bg-blue-800 text-white px-4 py-4">
           <h2 className="font-black text-lg">Campus Map</h2>
           <p className="text-blue-200 text-xs mt-0.5">University of Bohol</p>
+        </div>
+
+        {/* Global search */}
+        <div className="px-3 pt-3 pb-2 border-b border-gray-100 relative">
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setShowSearchResults(true);
+              }}
+              onFocus={() => setShowSearchResults(true)}
+              placeholder="Search buildings, viewpoints…"
+              className="w-full pl-9 pr-8 py-2 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none text-sm"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch("");
+                  setShowSearchResults(false);
+                }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
+                title="Clear"
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+
+          <AnimatePresence>
+            {showSearchResults && searchResults.length > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                className="absolute left-3 right-3 bg-white border border-gray-200 shadow-xl rounded-xl mt-1 z-30 max-h-72 overflow-y-auto"
+              >
+                {searchResults.map((r) => (
+                  <button
+                    key={`${r.type}-${r.id}`}
+                    type="button"
+                    onClick={() => {
+                      setShowSearchResults(false);
+                      setSearch("");
+                      if (r.type === "building") handleBuildingClick(r.data);
+                      else handlePanoSelect(r.data);
+                    }}
+                    className="w-full text-left px-3 py-2 hover:bg-blue-50 flex items-start gap-2 border-b border-gray-50 last:border-0"
+                  >
+                    <span
+                      className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                        r.type === "building" ? "bg-blue-100 text-blue-700" : "bg-yellow-100 text-yellow-800"
+                      }`}
+                    >
+                      {r.type === "building" ? <Building2 size={14} /> : <Camera size={14} />}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-semibold text-gray-800 truncate">{r.name}</span>
+                      <span className="block text-xs text-gray-500 truncate">{r.subtitle}</span>
+                    </span>
+                  </button>
+                ))}
+              </motion.div>
+            )}
+            {showSearchResults && search.trim().length > 0 && searchResults.length === 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                className="absolute left-3 right-3 bg-white border border-gray-200 shadow-xl rounded-xl mt-1 z-30 px-3 py-2 text-xs text-gray-500"
+              >
+                No buildings or viewpoints match "<strong>{search}</strong>".
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
         {/* Tabs */}
@@ -350,7 +513,7 @@ export default function MapPage() {
               initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }}
               className="absolute top-4 right-4 bg-white rounded-2xl shadow-xl border border-gray-200 p-4 max-w-xs w-full z-[1000]"
             >
-              <button onClick={() => setSelectedBuilding(null)} className="absolute top-3 right-3 text-gray-400 hover:text-gray-600 p-1">
+              <button onClick={() => { setSelectedBuilding(null); setSelectedPano(null); }} className="absolute top-3 right-3 text-gray-400 hover:text-gray-600 p-1">
                 <X size={16} />
               </button>
               <div className="pr-6">
@@ -360,6 +523,22 @@ export default function MapPage() {
                 <h3 className="font-black text-gray-800 text-base leading-tight">{selectedBuilding.name}</h3>
                 <span className="inline-block text-xs capitalize bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full mt-1">{selectedBuilding.category}</span>
                 <p className="text-gray-500 text-sm mt-2 leading-relaxed">{selectedBuilding.description?.slice(0, 120)}...</p>
+
+                {selectedPano && (
+                  <div className="mt-3 bg-yellow-50 border border-yellow-200 rounded-xl p-2.5">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-yellow-900">
+                      <Camera size={12} /> Selected viewpoint
+                    </div>
+                    <p className="font-semibold text-gray-800 text-sm mt-0.5 truncate">{selectedPano.name}</p>
+                    <button
+                      onClick={() => startGuidedTourTo(selectedPano.id)}
+                      className="mt-2 w-full bg-blue-700 hover:bg-blue-800 text-white text-xs font-bold py-1.5 rounded-lg flex items-center justify-center gap-1.5"
+                    >
+                      <Compass size={12} /> Start Guided Tour
+                    </button>
+                  </div>
+                )}
+
                 <div className="flex gap-2 mt-3">
                   <Link to={`/tours/${selectedBuilding.id}`}
                     className="flex-1 text-center bg-blue-700 text-white text-sm font-semibold py-2 rounded-xl hover:bg-blue-800 transition-colors flex items-center justify-center gap-1.5">

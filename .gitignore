@@ -1,0 +1,21 @@
+node_modules
+
+# env / secrets
+.env
+.env.*.local
+
+# build output
+dist
+
+# local databases / WAL files
+server/*.db
+server/*.db-*
+
+# uploads (stored in Supabase Storage in prod)
+public/uploads
+
+# logs / misc
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store

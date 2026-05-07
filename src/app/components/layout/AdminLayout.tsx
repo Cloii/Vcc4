@@ -3,7 +3,7 @@ import { Link, Outlet, useLocation, useNavigate } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
 import {
   LayoutDashboard, Map, Building2, BookOpen, BarChart3, Shield,
-  Users, LogOut, Menu, X, ChevronRight, Home,
+  Users, LogOut, Menu, X, ChevronRight, Home, ClipboardList, Camera,
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { UBLogo } from "./UBLogo";
@@ -12,12 +12,15 @@ import { SecurityMonitor } from "../security/SecurityMonitor";
 
 const sidebarLinks = [
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard, exact: true },
+  { to: "/admin/landing", label: "Landing Page", icon: Home },
   { to: "/admin/paths", label: "Path Management", icon: Map },
   { to: "/admin/buildings", label: "Buildings", icon: Building2 },
+  { to: "/admin/panoramas", label: "Panoramas (360°)", icon: Camera },
   { to: "/admin/resources", label: "Resources", icon: BookOpen },
   { to: "/admin/analytics", label: "Analytics", icon: BarChart3 },
   { to: "/admin/security", label: "Security Logs", icon: Shield },
   { to: "/admin/users", label: "User Management", icon: Users },
+  { to: "/admin/audit", label: "Audit Log", icon: ClipboardList },
 ];
 
 export const AdminLayout: React.FC = () => {

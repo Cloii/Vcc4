@@ -7,6 +7,7 @@ import Landing from "./pages/Landing";
 import MapPage from "./pages/Map";
 import Tours from "./pages/Tours";
 import TourDetail from "./pages/TourDetail";
+import CampusTour from "./pages/CampusTour";
 import Directory from "./pages/Directory";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
@@ -18,6 +19,9 @@ import AdminResources from "./pages/admin/Resources";
 import AdminAnalytics from "./pages/admin/Analytics";
 import AdminSecurity from "./pages/admin/Security";
 import AdminUsers from "./pages/admin/Users";
+import AuditLog from "./pages/admin/AuditLog";
+import AdminPanoramas from "./pages/admin/Panoramas";
+import LandingEditor from "./pages/admin/LandingEditor";
 
 // Protected route wrapper for admin
 const AdminGuard: React.FC = () => {
@@ -44,6 +48,7 @@ export const router = createBrowserRouter([
       { path: "map", Component: MapPage },
       { path: "tours", Component: Tours },
       { path: "tours/:buildingId", Component: TourDetail },
+      { path: "campus-tour", Component: CampusTour },
       { path: "directory", Component: Directory },
       { path: "login", Component: Login },
       { path: "signup", Component: Signup },
@@ -60,10 +65,13 @@ export const router = createBrowserRouter([
           { index: true, Component: AdminDashboard },
           { path: "paths", Component: AdminPaths },
           { path: "buildings", Component: AdminBuildings },
+          { path: "panoramas", Component: AdminPanoramas },
           { path: "resources", Component: AdminResources },
           { path: "analytics", Component: AdminAnalytics },
           { path: "security", Component: AdminSecurity },
           { path: "users", Component: AdminUsers },
+          { path: "audit", Component: AuditLog },
+          { path: "landing", Component: LandingEditor },
         ],
       },
     ],

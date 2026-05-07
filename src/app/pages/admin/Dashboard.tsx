@@ -1,7 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { motion } from "motion/react";
-import { BarChart3, Building2, Map, BookOpen, Users, Shield, AlertTriangle, TrendingUp, Eye, Route } from "lucide-react";
+import {
+  BarChart3, Building2, Map, BookOpen, Users, Shield, AlertTriangle,
+  TrendingUp, Eye, Route, Server, Database, CheckCircle2, XCircle, ClipboardList
+} from "lucide-react";
 import { getAnalytics, getBuildings, getPaths, getResources, getSecurityAlerts, getUsers } from "../../lib/api";
 
 const StatCard = ({ icon: Icon, label, value, color, link }: any) => (
@@ -23,6 +26,14 @@ export default function AdminDashboard() {
   const [stats, setStats] = useState({ buildings: 0, paths: 0, resources: 0, users: 0, alerts: 0 });
   const [loading, setLoading] = useState(true);
   const [recentAlerts, setRecentAlerts] = useState<any[]>([]);
+  const [serverStatus, setServerStatus] = useState<"checking" | "online" | "offline">("checking");
+
+  // Check server health
+  useEffect(() => {
+    fetch("http://localhost:3001/api/health")
+      .then(r => r.ok ? setServerStatus("online") : setServerStatus("offline"))
+      .catch(() => setServerStatus("offline"));
+  }, []);
 
   useEffect(() => {
     Promise.all([
@@ -45,8 +56,6 @@ export default function AdminDashboard() {
     }).catch(console.error).finally(() => setLoading(false));
   }, []);
 
-  const openPaths = analytics?.actionCounts;
-
   if (loading) return (
     <div className="flex items-center justify-center h-64">
       <div className="w-10 h-10 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
@@ -57,11 +66,33 @@ export default function AdminDashboard() {
     <div className="space-y-6">
       {/* Welcome */}
       <div className="bg-gradient-to-br from-blue-700 to-blue-900 rounded-2xl p-6 text-white">
-        <h2 className="text-2xl font-black mb-1">Admin Dashboard</h2>
-        <p className="text-blue-200 text-sm">University of Bohol — Virtual Campus Companion</p>
-        <div className="mt-4 flex items-center gap-2 text-xs text-blue-300">
-          <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-          System operational · {new Date().toLocaleDateString("en-PH", { weekday:"long", year:"numeric", month:"long", day:"numeric" })}
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 className="text-2xl font-black mb-1">Admin Dashboard</h2>
+            <p className="text-blue-200 text-sm">University of Bohol — Virtual Campus Companion</p>
+            <div className="mt-4 flex items-center gap-2 text-xs text-blue-300">
+              <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+              System operational · {new Date().toLocaleDateString("en-PH", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
+            </div>
+          </div>
+          <div className="hidden sm:flex flex-col items-end gap-2">
+            <div className={`flex items-center gap-2 text-xs font-semibold px-3 py-1.5 rounded-full
+              ${serverStatus === "online" ? "bg-green-500/20 text-green-200" :
+                serverStatus === "offline" ? "bg-red-500/20 text-red-200" :
+                "bg-white/10 text-blue-200"}`}>
+              {serverStatus === "online" ? <CheckCircle2 size={13} /> :
+               serverStatus === "offline" ? <XCircle size={13} /> :
+               <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+              {serverStatus === "online" ? "Backend Online" :
+               serverStatus === "offline" ? "Backend Offline" : "Checking..."}
+            </div>
+            <div className="flex items-center gap-1.5 text-xs text-blue-300">
+              <Database size={12} /> SQLite Local Database
+            </div>
+            <div className="flex items-center gap-1.5 text-xs text-blue-300">
+              <Server size={12} /> localhost:3001
+            </div>
+          </div>
         </div>
       </div>
 
@@ -85,8 +116,9 @@ export default function AdminDashboard() {
           <div className="space-y-3">
             {[
               { label: "Total Activity Logs", value: analytics?.totalLogs || 0, icon: Eye, color: "bg-blue-100 text-blue-700" },
-              { label: "Unique Users", value: analytics?.uniqueUsers || 0, icon: Users, color: "bg-green-100 text-green-700" },
+              { label: "Unique Active Users", value: analytics?.uniqueUsers || 0, icon: Users, color: "bg-green-100 text-green-700" },
               { label: "Security Alerts", value: analytics?.totalAlerts || 0, icon: Shield, color: "bg-red-100 text-red-700" },
+              { label: "New Signups (7 days)", value: analytics?.recentSignups || 0, icon: Users, color: "bg-purple-100 text-purple-700" },
             ].map(({ label, value, icon: Icon, color }) => (
               <div key={label} className="flex items-center justify-between p-3 bg-gray-50 rounded-xl">
                 <div className="flex items-center gap-2">
@@ -135,21 +167,47 @@ export default function AdminDashboard() {
       {/* Quick Actions */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
         <h3 className="font-black text-gray-800 mb-4">Quick Actions</h3>
-        <div className="grid sm:grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
           {[
             { label: "Manage Paths", icon: Route, to: "/admin/paths", color: "from-green-500 to-green-700" },
             { label: "Add Building", icon: Building2, to: "/admin/buildings", color: "from-blue-500 to-blue-700" },
             { label: "View Analytics", icon: BarChart3, to: "/admin/analytics", color: "from-purple-500 to-purple-700" },
             { label: "Security Logs", icon: Shield, to: "/admin/security", color: "from-red-500 to-red-700" },
+            { label: "Manage Users", icon: Users, to: "/admin/users", color: "from-orange-500 to-orange-700" },
+            { label: "Audit Log", icon: ClipboardList, to: "/admin/audit", color: "from-slate-600 to-slate-800" },
           ].map(({ label, icon: Icon, to, color }) => (
             <Link key={to} to={to}
               className={`flex flex-col items-center gap-2 bg-gradient-to-br ${color} text-white py-4 px-3 rounded-xl hover:shadow-lg transition-all hover:scale-105`}>
               <Icon size={22} />
-              <span className="text-sm font-semibold text-center">{label}</span>
+              <span className="text-xs font-semibold text-center leading-tight">{label}</span>
             </Link>
           ))}
         </div>
       </div>
+
+      {/* Popular Buildings */}
+      {analytics?.popularBuildings?.length > 0 && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+          <h3 className="font-black text-gray-800 mb-4 flex items-center gap-2">
+            <Building2 size={18} className="text-blue-600" /> Most Visited Buildings
+          </h3>
+          <div className="space-y-2">
+            {analytics.popularBuildings.map((b: any, i: number) => (
+              <div key={b.id} className="flex items-center gap-3">
+                <span className="w-6 text-center text-xs font-black text-gray-400">{i + 1}</span>
+                <div className="flex-1 bg-gray-100 rounded-full h-2 overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-blue-500 to-blue-700 rounded-full transition-all"
+                    style={{ width: `${Math.min(100, (b.views / (analytics.popularBuildings[0]?.views || 1)) * 100)}%` }}
+                  />
+                </div>
+                <span className="text-sm text-gray-700 font-semibold w-40 truncate">{b.name}</span>
+                <span className="text-xs text-gray-500 w-16 text-right">{b.views} views</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

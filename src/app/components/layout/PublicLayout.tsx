@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
-import { Map, Camera, BookOpen, LogIn, Menu, X, User, LogOut, Settings, ChevronDown } from "lucide-react";
+import { Map, Camera, BookOpen, LogIn, Menu, X, User, LogOut, Settings, ChevronDown, Compass } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { UBLogo } from "./UBLogo";
 import { Watermark } from "../security/Watermark";
@@ -9,6 +9,7 @@ import { SecurityMonitor } from "../security/SecurityMonitor";
 
 const navLinks = [
   { to: "/map", label: "Campus Map", icon: Map },
+  { to: "/campus-tour", label: "Campus Tour", icon: Compass },
   { to: "/tours", label: "Virtual Tours", icon: Camera },
   { to: "/directory", label: "Directory", icon: BookOpen },
 ];
@@ -38,7 +39,7 @@ export const PublicLayout: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 flex items-center justify-between h-16">
           {/* Logo */}
           <Link to="/" className="flex-shrink-0">
-            <UBLogo size="sm" showText={true} variant="light" />
+            <UBLogo size="md" showText={true} variant="light" />
           </Link>
 
           {/* Desktop Nav Links */}
@@ -47,11 +48,10 @@ export const PublicLayout: React.FC = () => {
               <Link
                 key={to}
                 to={to}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all font-medium text-sm ${
-                  isActive(to)
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all font-medium text-sm ${isActive(to)
                     ? "bg-yellow-500 text-blue-900"
                     : "text-blue-100 hover:bg-blue-700 hover:text-white"
-                }`}
+                  }`}
               >
                 <Icon size={16} />
                 {label}
@@ -120,9 +120,8 @@ export const PublicLayout: React.FC = () => {
                   <Link
                     key={to} to={to}
                     onClick={() => setMobileOpen(false)}
-                    className={`flex items-center gap-2 px-4 py-3 rounded-lg transition-all font-medium ${
-                      isActive(to) ? "bg-yellow-500 text-blue-900" : "text-blue-100 hover:bg-blue-700"
-                    }`}
+                    className={`flex items-center gap-2 px-4 py-3 rounded-lg transition-all font-medium ${isActive(to) ? "bg-yellow-500 text-blue-900" : "text-blue-100 hover:bg-blue-700"
+                      }`}
                   >
                     <Icon size={18} /> {label}
                   </Link>
@@ -141,7 +140,7 @@ export const PublicLayout: React.FC = () => {
       {/* Footer */}
       <footer className="bg-blue-900 text-blue-200 py-6 mt-auto">
         <div className="max-w-7xl mx-auto px-4 text-center">
-          <p className="text-sm">© 2025 University of Bohol — Virtual Campus Companion</p>
+          <p className="text-sm">© 2026 University of Bohol — Virtual Campus Companion</p>
           <p className="text-xs mt-1 text-blue-400">Tagbilaran City, Bohol, Philippines</p>
         </div>
       </footer>

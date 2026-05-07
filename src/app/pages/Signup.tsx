@@ -2,9 +2,9 @@ import React, { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { motion } from "motion/react";
 import { Mail, Lock, Eye, EyeOff, User, AlertCircle, UserPlus, Key } from "lucide-react";
-import { signup } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { UBLogo } from "../components/layout/UBLogo";
+import { supabase } from "../lib/supabaseClient";
 
 export default function Signup() {
   const { signIn } = useAuth();
@@ -27,7 +27,34 @@ export default function Signup() {
     if (form.password.length < 6) return setError("Password must be at least 6 characters");
     setLoading(true);
     try {
-      await signup({ name: form.name, email: form.email, password: form.password, role: form.role, adminCode: form.adminCode });
+      const { data, error } = await supabase.auth.signUp({
+        email: form.email,
+        password: form.password,
+        options: { data: { name: form.name } },
+      });
+      if (error) throw error;
+
+      // If staff/admin selected, call serverless role assignment (codes stored as env vars on Vercel).
+      if (form.role === "admin" || form.role === "staff") {
+        const accessToken = data.session?.access_token;
+        if (!accessToken) {
+          // If email confirmation is enabled, user may not have a session yet.
+          throw new Error("Check your email to confirm your account, then sign in to apply role.");
+        }
+        const res = await fetch("/api/set-role", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ role: form.role, code: form.adminCode }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: res.statusText }));
+          throw new Error(err.error || "Failed to apply role");
+        }
+      }
+
       await signIn(form.email, form.password);
       navigate("/");
     } catch (err: any) {

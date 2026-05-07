@@ -1,12 +1,27 @@
-import React, { useRef, useState, useEffect, useCallback } from "react";
-import { motion, AnimatePresence } from "motion/react";
-import { ChevronLeft, ChevronRight, Maximize2, Minimize2, Navigation2, Info } from "lucide-react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
+import { ChevronLeft, ChevronRight, Info, Maximize2, Minimize2, Navigation2, ZoomIn, ZoomOut } from "lucide-react";
+import { Viewer } from "@photo-sphere-viewer/core";
+import {
+  toggleTourImmersive,
+  isTourImmersive,
+  exitPseudoFullscreen,
+  isPseudoFullscreen,
+  exitDocumentFullscreen,
+} from "../../lib/domFullscreen";
+import { MarkersPlugin } from "@photo-sphere-viewer/markers-plugin";
+import "@photo-sphere-viewer/core/index.css";
+import "@photo-sphere-viewer/markers-plugin/index.css";
 
 interface Hotspot {
   x: number;
   y: number;
   label: string;
   targetPanoId: string;
+  // Optional real 360 coordinates (preferred).
+  // yawDeg: 0..360 (0 = forward), pitchDeg: -90..90 (up/down)
+  yawDeg?: number;
+  pitchDeg?: number;
 }
 
 interface PanoramaViewerProps {
@@ -16,165 +31,326 @@ interface PanoramaViewerProps {
   onHotspotClick?: (targetPanoId: string) => void;
 }
 
+const SERVER_URL = "http://localhost:3001";
+const resolveUrl = (url: string) => {
+  if (!url) return "";
+  if (url.startsWith("http")) return url;
+  return `${SERVER_URL}${url}`;
+};
+
 export const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
   imageUrl, name, hotspots = [], onHotspotClick,
 }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [dragging, setDragging] = useState(false);
-  const [startX, setStartX] = useState(0);
-  const [offset, setOffset] = useState(0);
-  const [currentOffset, setCurrentOffset] = useState(0);
-  const [fullscreen, setFullscreen] = useState(false);
+  const viewerContainerRef = useRef<HTMLDivElement>(null);
+  const viewerRef = useRef<Viewer | null>(null);
+  const markersRef = useRef<MarkersPlugin | null>(null);
+  const panoramaLoadGenRef = useRef(0);
+
+  const [zoom, setZoom] = useState(50); // PSV zoom level (approx 0..100)
+  const shellRef = useRef<HTMLDivElement>(null);
+  const [immersive, setImmersive] = useState(false);
   const [showHint, setShowHint] = useState(true);
   const [loaded, setLoaded] = useState(false);
+  const [imgError, setImgError] = useState(false);
+
+  const resolvedUrl = useMemo(() => resolveUrl(imageUrl), [imageUrl]);
 
   useEffect(() => {
-    setOffset(0);
-    setCurrentOffset(0);
+    setZoom(50);
     setLoaded(false);
-    const t = setTimeout(() => setShowHint(false), 3000);
+    setImgError(false);
+    const t = setTimeout(() => setShowHint(false), 3500);
     return () => clearTimeout(t);
   }, [imageUrl]);
 
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    setDragging(true);
-    setStartX(e.clientX);
-  }, []);
+  async function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+    let to: any;
+    try {
+      return await Promise.race([
+        p,
+        new Promise<T>((_, reject) => {
+          to = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+        }),
+      ]);
+    } finally {
+      clearTimeout(to);
+    }
+  }
 
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!dragging) return;
-    const delta = (e.clientX - startX) * 0.3;
-    const newOffset = currentOffset + delta;
-    const clamped = Math.max(-60, Math.min(0, newOffset));
-    setOffset(clamped);
-  }, [dragging, startX, currentOffset]);
+  // Init viewer once
+  useEffect(() => {
+    if (!viewerContainerRef.current) return;
+    if (viewerRef.current) return;
 
-  const handleMouseUp = useCallback(() => {
-    setDragging(false);
-    setCurrentOffset(offset);
-  }, [offset]);
+    const viewer = new Viewer({
+      container: viewerContainerRef.current,
+      navbar: false,
+      mousewheel: true,
+      touchmoveTwoFingers: false,
+      loadingTxt: "Loading 360° panorama…",
+      plugins: [
+        MarkersPlugin.withConfig({
+          markers: [],
+        }),
+      ],
+    });
 
-  const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    setDragging(true);
-    setStartX(e.touches[0].clientX);
-  }, []);
+    viewerRef.current = viewer;
+    markersRef.current = viewer.getPlugin(MarkersPlugin) as unknown as MarkersPlugin;
 
-  const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    if (!dragging) return;
-    const delta = (e.touches[0].clientX - startX) * 0.3;
-    const newOffset = currentOffset + delta;
-    const clamped = Math.max(-60, Math.min(0, newOffset));
-    setOffset(clamped);
-  }, [dragging, startX, currentOffset]);
+    const onReady = () => setLoaded(true);
+    const onPanoramaError = () => {
+      setLoaded(true);
+      setImgError(true);
+    };
 
-  const handleTouchEnd = useCallback(() => {
-    setDragging(false);
-    setCurrentOffset(offset);
-  }, [offset]);
+    // core events
+    viewer.addEventListener("ready", onReady);
+    viewer.addEventListener("panorama-error", onPanoramaError as any);
 
-  const pan = (direction: "left" | "right") => {
-    const delta = direction === "left" ? 15 : -15;
-    const newOffset = Math.max(-60, Math.min(0, currentOffset + delta));
-    setCurrentOffset(newOffset);
-    setOffset(newOffset);
+    // marker click -> navigate
+    const markers = markersRef.current;
+    const onSelectMarker = (e: any) => {
+      const marker = e?.marker;
+      const targetPanoId = marker?.config?.data?.targetPanoId;
+      if (targetPanoId) onHotspotClick?.(targetPanoId);
+    };
+    markers?.addEventListener("select-marker", onSelectMarker as any);
+
+    return () => {
+      try {
+        const shell = shellRef.current;
+        if (shell && isPseudoFullscreen(shell)) exitPseudoFullscreen(shell);
+        void exitDocumentFullscreen();
+        markers?.removeEventListener("select-marker", onSelectMarker as any);
+        viewer.removeEventListener("ready", onReady);
+        viewer.removeEventListener("panorama-error", onPanoramaError as any);
+        viewer.destroy();
+      } finally {
+        viewerRef.current = null;
+        markersRef.current = null;
+      }
+    };
+  }, [onHotspotClick]); // IMPORTANT: do not recreate viewer when URL changes
+
+  // Load panorama when image changes
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+
+    if (!resolvedUrl) {
+      setLoaded(true);
+      setImgError(true);
+      return;
+    }
+
+    setLoaded(false);
+    setImgError(false);
+
+    const gen = ++panoramaLoadGenRef.current;
+
+    void (async () => {
+      try {
+        await withTimeout(viewer.setPanorama(resolvedUrl), 60000, "Panorama load");
+        if (gen !== panoramaLoadGenRef.current) return;
+        setLoaded(true);
+        setImgError(false);
+      } catch {
+        if (gen !== panoramaLoadGenRef.current) return;
+        // If PSV aborted/choked, still allow ready-state recovery via `ready` event above.
+        // This timeout mainly prevents infinite spinners on bad URLs/hangs.
+        setLoaded(true);
+        setImgError(true);
+      }
+    })();
+
+    return () => {
+      panoramaLoadGenRef.current++;
+    };
+  }, [resolvedUrl]);
+
+  // Hotspots -> markers
+  useEffect(() => {
+    const markers = markersRef.current;
+    if (!markers) return;
+
+    // Backward-compatible conversion:
+    // - old x: 0..100 across panorama => yaw 0..360deg
+    // - old y: 0..100 top..bottom => pitch +30..-30deg (keeps markers near horizon by default)
+    const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+    const markersList = hotspots.map((hs, i) => {
+      const yawDeg = hs.yawDeg ?? ((hs.x ?? 0) / 100) * 360;
+      const pitchDeg = hs.pitchDeg ?? (30 - clamp(hs.y ?? 50, 0, 100) * 0.6); // 0->30, 100->-30
+
+      return {
+        id: `hs-${i}`,
+        position: { yaw: `${yawDeg}deg`, pitch: `${pitchDeg}deg` },
+        html: `
+          <button
+            type="button"
+            style="
+              width:44px;height:44px;border-radius:999px;
+              border:4px solid #fff;background:#facc15;
+              box-shadow:0 10px 25px rgba(0,0,0,0.35);
+              display:flex;align-items:center;justify-content:center;
+              cursor:pointer;
+            "
+            aria-label="${hs.label ?? "Hotspot"}"
+            title="${hs.label ?? ""}"
+          >
+            <span style="font-size:14px;color:#1e3a8a;font-weight:900;">↗</span>
+          </button>
+        `,
+        anchor: "center center",
+        data: { targetPanoId: hs.targetPanoId },
+        tooltip: hs.label ? { content: hs.label, position: "top center" } : undefined,
+      };
+    });
+
+    try {
+      (markers as any).setMarkers(markersList);
+    } catch {
+      // fallback for older plugin API
+      (markers as any).clearMarkers?.();
+      markersList.forEach((m) => (markers as any).addMarker?.(m));
+    }
+  }, [hotspots]);
+
+  const syncImmersiveUi = () => {
+    const el = shellRef.current;
+    setImmersive(!!el && isTourImmersive(el));
   };
 
-  // Calculate the percentage from left (0 = far left, 100 = center)
-  const pctFromLeft = Math.abs(offset) / 60;
+  const resizePanoramaView = () => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    viewer.resize();
+    requestAnimationFrame(() => viewer.resize());
+    setTimeout(() => viewer.resize(), 80);
+    setTimeout(() => viewer.resize(), 250);
+    requestAnimationFrame(syncImmersiveUi);
+  };
+
+  useEffect(() => {
+    const onFsChange = () => resizePanoramaView();
+    document.addEventListener("fullscreenchange", onFsChange);
+    document.addEventListener("webkitfullscreenchange", onFsChange as EventListener);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFsChange);
+      document.removeEventListener("webkitfullscreenchange", onFsChange as EventListener);
+    };
+  }, []);
+
+  const zoomIn = () => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    const next = Math.min(100, zoom + 10);
+    setZoom(next);
+    viewer.zoom(next);
+  };
+
+  const zoomOut = () => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    const next = Math.max(0, zoom - 10);
+    setZoom(next);
+    viewer.zoom(next);
+  };
+
+  const pan = (dir: "left" | "right") => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    const pos = viewer.getPosition();
+    const step = (15 * Math.PI) / 180;
+    viewer.rotate({ yaw: pos.yaw + (dir === "left" ? -step : step), pitch: pos.pitch });
+  };
+
+  useEffect(() => {
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const el = shellRef.current;
+      if (!el || !isPseudoFullscreen(el)) return;
+      exitPseudoFullscreen(el);
+      resizePanoramaView();
+      setImmersive(false);
+    };
+    window.addEventListener("keydown", onEsc);
+    return () => window.removeEventListener("keydown", onEsc);
+  }, []);
 
   return (
     <div
-      className={`relative overflow-hidden bg-black select-none ${fullscreen ? "fixed inset-0 z-50" : "rounded-2xl"}`}
-      style={{ height: fullscreen ? "100vh" : "100%" }}
+      ref={shellRef}
+      className={`relative h-full overflow-hidden bg-black select-none ${immersive ? "" : "rounded-2xl"}`}
     >
-      {/* Main panorama image */}
+      {/* ── Panorama image ─────────────────────────────────────────────────── */}
       <div
-        ref={containerRef}
+        ref={viewerContainerRef}
         className="absolute inset-0"
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUp}
-        onMouseLeave={handleMouseUp}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-        style={{ cursor: dragging ? "grabbing" : "grab" }}
+        style={{ cursor: "grab" }}
       >
-        {!loaded && (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
-            <div className="w-12 h-12 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
+        {/* Loading spinner */}
+        {!loaded && !imgError && (
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-900 z-10">
+            <div className="text-center">
+              <div className="w-12 h-12 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mx-auto" />
+              <p className="text-white/60 text-xs mt-3">Loading 360° panorama…</p>
+            </div>
           </div>
         )}
-        <img
-          src={imageUrl}
-          alt={name}
-          onLoad={() => setLoaded(true)}
-          className="absolute top-0 left-0 h-full object-cover pointer-events-none"
-          style={{
-            width: "200%",
-            transform: `translateX(${offset * 1.67}%)`,
-            transition: dragging ? "none" : "transform 0.3s ease-out",
-            opacity: loaded ? 1 : 0,
-          }}
-          draggable={false}
-        />
 
-        {/* Dark overlay on edges for depth effect */}
+        {/* Error state */}
+        {imgError && (
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-900 z-10">
+            <div className="text-center text-gray-400">
+              <div className="text-4xl mb-2">⚠️</div>
+              <p className="text-sm font-semibold">Could not load panorama</p>
+              <p className="text-xs text-gray-500 mt-1 max-w-xs mx-auto break-all">{resolvedUrl}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Atmospheric overlays */}
         <div className="absolute inset-0 pointer-events-none"
-          style={{ background: "linear-gradient(to right, rgba(0,0,0,0.3) 0%, transparent 15%, transparent 85%, rgba(0,0,0,0.3) 100%)" }} />
-
-        {/* Sky gradient at top */}
-        <div className="absolute top-0 left-0 right-0 h-16 pointer-events-none"
-          style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.4) 0%, transparent 100%)" }} />
-
-        {/* Floor gradient at bottom */}
-        <div className="absolute bottom-0 left-0 right-0 h-24 pointer-events-none"
-          style={{ background: "linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 100%)" }} />
+          style={{ background: "linear-gradient(to right, rgba(0,0,0,0.25) 0%, transparent 12%, transparent 88%, rgba(0,0,0,0.25) 100%)" }} />
+        <div className="absolute top-0 left-0 right-0 h-20 pointer-events-none"
+          style={{ background: "linear-gradient(to bottom, rgba(0,0,0,0.35) 0%, transparent 100%)" }} />
+        <div className="absolute bottom-0 left-0 right-0 h-28 pointer-events-none"
+          style={{ background: "linear-gradient(to top, rgba(0,0,0,0.55) 0%, transparent 100%)" }} />
       </div>
 
-      {/* Hotspots */}
-      {loaded && hotspots.map((hs, i) => {
-        // Calculate hotspot visibility based on current view offset
-        const visibleX = ((pctFromLeft * 50) + (hs.x * 0.5));
-        const screenX = hs.x - Math.abs(offset) * 0.7;
-        if (screenX < -10 || screenX > 110) return null;
-        return (
-          <motion.button
-            key={i}
-            initial={{ scale: 0 }} animate={{ scale: 1 }}
-            className="absolute z-10 group"
-            style={{ left: `${screenX}%`, top: `${hs.y}%`, transform: "translate(-50%, -50%)" }}
-            onClick={() => onHotspotClick?.(hs.targetPanoId)}
-          >
-            <div className="relative">
-              <div className="w-10 h-10 bg-yellow-500 border-4 border-white rounded-full flex items-center justify-center shadow-lg animate-pulse group-hover:scale-125 transition-transform">
-                <Navigation2 size={16} className="text-blue-900" />
-              </div>
-              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-                <div className="bg-white text-gray-800 text-xs font-bold px-3 py-1.5 rounded-full shadow-lg">
-                  {hs.label}
-                </div>
-              </div>
-            </div>
-          </motion.button>
-        );
-      })}
-
-      {/* Top bar */}
-      <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4 py-3 pointer-events-none">
-        <div className="bg-black/60 backdrop-blur-sm text-white px-3 py-1.5 rounded-lg flex items-center gap-2 pointer-events-auto">
+      {/* ── Top Bar ────────────────────────────────────────────────────────── */}
+      <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4 py-3">
+        <div className="bg-black/60 backdrop-blur-sm text-white px-3 py-1.5 rounded-lg flex items-center gap-2">
           <Info size={14} />
           <span className="text-sm font-semibold">{name}</span>
         </div>
-        <div className="flex gap-2 pointer-events-auto">
-          <button onClick={() => setFullscreen(!fullscreen)}
-            className="bg-black/60 backdrop-blur-sm text-white p-2 rounded-lg hover:bg-black/80 transition-colors">
-            {fullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
+        <div className="flex gap-2">
+          <button onClick={zoomIn}
+            className="bg-black/60 backdrop-blur-sm text-white p-2 rounded-lg hover:bg-black/80 transition-colors" title="Zoom in">
+            <ZoomIn size={15} />
+          </button>
+          <button onClick={zoomOut}
+            className="bg-black/60 backdrop-blur-sm text-white p-2 rounded-lg hover:bg-black/80 transition-colors" title="Zoom out">
+            <ZoomOut size={15} />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const el = shellRef.current;
+              const viewer = viewerRef.current;
+              if (!el || !viewer) return;
+              void toggleTourImmersive(el, resizePanoramaView).then(() => resizePanoramaView());
+            }}
+            className="bg-black/60 backdrop-blur-sm text-white p-2 rounded-lg hover:bg-black/80 transition-colors"
+            title={immersive ? "Exit fullscreen" : "Fullscreen"}
+          >
+            {immersive ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
           </button>
         </div>
       </div>
 
-      {/* Navigation arrows */}
+      {/* ── Navigator arrows ─────────────────────────────────────────────── */}
       <div className="absolute left-3 top-1/2 -translate-y-1/2 z-20">
         <button onClick={() => pan("left")} className="bg-black/60 backdrop-blur-sm text-white p-3 rounded-full hover:bg-yellow-500 hover:text-blue-900 transition-all shadow-lg">
           <ChevronLeft size={22} />
@@ -186,30 +362,19 @@ export const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
         </button>
       </div>
 
-      {/* Progress bar (shows viewing position) */}
-      <div className="absolute bottom-16 left-6 right-6 z-20">
-        <div className="h-1 bg-white/30 rounded-full overflow-hidden">
-          <div className="h-full bg-yellow-500 rounded-full transition-all duration-200"
-            style={{ width: `${Math.abs(offset / 60) * 100}%`, marginLeft: "0" }} />
-        </div>
-        <div className="flex justify-between text-white/50 text-xs mt-1">
-          <span>◀ Drag to explore</span>
-          <span>▶</span>
-        </div>
-      </div>
-
-      {/* Drag hint */}
+      {/* ── Drag hint ───────────────────────────────────────────────────── */}
       <AnimatePresence>
-        {showHint && loaded && (
+        {showHint && loaded && !imgError && (
           <motion.div
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="absolute inset-0 flex items-center justify-center z-30 pointer-events-none"
           >
             <div className="bg-black/70 text-white px-6 py-4 rounded-2xl flex flex-col items-center gap-2">
-              <motion.div animate={{ x: [-10, 10, -10] }} transition={{ repeat: Infinity, duration: 1.5 }}>
+              <motion.div animate={{ x: [-12, 12, -12] }} transition={{ repeat: Infinity, duration: 1.5 }}>
                 <Navigation2 size={28} />
               </motion.div>
-              <p className="text-sm font-semibold">Drag to look around</p>
+              <p className="text-sm font-semibold">Drag to explore 360°</p>
+              <p className="text-xs text-white/60">Scroll to zoom · Arrow buttons to pan</p>
             </div>
           </motion.div>
         )}

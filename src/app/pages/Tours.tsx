@@ -6,6 +6,13 @@ import { getBuildings } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { logActivity } from "../lib/api";
 
+const SERVER_URL = "http://localhost:3001";
+const resolveImageUrl = (url?: string) => {
+  if (!url) return "";
+  if (url.startsWith("http")) return url;
+  return `${SERVER_URL}${url}`;
+};
+
 const categoryColors: Record<string, { bg: string; text: string; border: string }> = {
   admin: { bg: "bg-blue-100", text: "text-blue-700", border: "border-blue-200" },
   academic: { bg: "bg-green-100", text: "text-green-700", border: "border-green-200" },
@@ -98,7 +105,7 @@ export default function Tours() {
                 >
                   {/* Image */}
                   <div className="relative h-48 overflow-hidden">
-                    <img src={b.imageUrl} alt={b.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                    <img src={resolveImageUrl(b.imageUrl)} alt={b.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
                     {/* Play button */}
                     <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">

@@ -79,7 +79,7 @@ export default function Login() {
                 <Mail size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   type="email" value={email} onChange={e => setEmail(e.target.value)}
-                  required placeholder="you@uboh.edu.ph"
+                  required placeholder="you@universityofbohol.edu.ph"
                   className="w-full pl-10 pr-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none transition-colors bg-gray-50"
                 />
               </div>
@@ -119,11 +119,7 @@ export default function Login() {
             </p>
           </div>
 
-          <div className="mt-4 p-3 bg-yellow-50 rounded-xl border border-yellow-200">
-            <p className="text-xs text-yellow-800 text-center font-medium">
-              🔒 Demo: Admin code is <strong>UB-ADMIN-2024</strong> (sign up with admin role)
-            </p>
-          </div>
+          {/* Demo hint removed for production */}
         </div>
       </motion.div>
     </div>

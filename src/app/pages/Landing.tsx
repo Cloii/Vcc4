@@ -3,9 +3,37 @@ import { Link } from "react-router";
 import { motion } from "motion/react";
 import { Map, Camera, BookOpen, Shield, Route, Building2, ArrowRight, Star, Users, Clock } from "lucide-react";
 import { UBLogo } from "../components/layout/UBLogo";
+import { getLandingContent, SERVER_URL, type LandingContent } from "../lib/api";
 
-const HERO_IMAGE = "https://images.unsplash.com/photo-1572162452011-08150287fc3a?w=1600&q=80";
-const CAMPUS_IMAGE = "https://images.unsplash.com/photo-1769589634324-cac82da5ac3a?w=800&q=80";
+const DEFAULT_CONTENT: LandingContent = {
+  heroBadge: "University of Bohol",
+  heroTitle: "Virtual Campus",
+  heroTitleAccent: "Companion",
+  heroSubtitle:
+    "Explore, navigate, and discover the University of Bohol campus through immersive 360° tours and interactive maps.",
+  heroImageUrl: "https://images.unsplash.com/photo-1572162452011-08150287fc3a?w=1600&q=80",
+  campusImageUrl: "https://images.unsplash.com/photo-1769589634324-cac82da5ac3a?w=800&q=80",
+  campusCardTitle: "Main Administration Building",
+  campusCardSubtitle: "Click to start tour →",
+  campusSectionBadge: "360° Virtual Tours",
+  campusSectionTitle: "Explore Campus Without Leaving Home",
+  campusSectionBody:
+    "Navigate through our immersive panoramic tours of all major buildings. Click hotspots to walk through corridors, visit labs, and discover hidden gems of the UB campus.",
+  ctaTitle: "Ready to Explore UB Campus?",
+  ctaBody: "Sign up for free and unlock the full campus experience with your student or staff account.",
+  ctaPrimaryLabel: "Get Started Free",
+  ctaPrimaryTo: "/signup",
+  ctaSecondaryLabel: "View Campus Map",
+  ctaSecondaryTo: "/map",
+  stats: [
+    { label: "Campus Buildings", value: "10+" },
+    { label: "Virtual Tours", value: "10" },
+    { label: "Campus Resources", value: "50+" },
+    { label: "Active Students", value: "5000+" },
+  ],
+};
+
+const toDisplayUrl = (url: string) => (url?.startsWith("/uploads/") ? `${SERVER_URL}${url}` : url);
 
 const features = [
   { icon: Map, title: "Interactive Campus Map", desc: "Navigate the UB campus with our real-time interactive map powered by OpenStreetMap.", color: "bg-blue-100 text-blue-700", link: "/map" },
@@ -16,12 +44,7 @@ const features = [
   { icon: Building2, title: "Building Information", desc: "Detailed info on every building including contacts, hours, and categories.", color: "bg-orange-100 text-orange-700", link: "/directory" },
 ];
 
-const stats = [
-  { label: "Campus Buildings", value: "10+", icon: Building2 },
-  { label: "Virtual Tours", value: "10", icon: Camera },
-  { label: "Campus Resources", value: "50+", icon: BookOpen },
-  { label: "Active Students", value: "5000+", icon: Users },
-];
+const statIcons = [Building2, Camera, BookOpen, Users];
 
 const quickLinks = [
   { label: "Campus Map", to: "/map", icon: Map, color: "from-blue-600 to-blue-800" },
@@ -32,10 +55,21 @@ const quickLinks = [
 
 export default function Landing() {
   const [scrollY, setScrollY] = useState(0);
+  const [content, setContent] = useState<LandingContent>(DEFAULT_CONTENT);
   useEffect(() => {
     const onScroll = () => setScrollY(window.scrollY);
     window.addEventListener("scroll", onScroll);
     return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    getLandingContent()
+      .then((r) => mounted && r?.content && setContent({ ...DEFAULT_CONTENT, ...r.content }))
+      .catch(() => void 0);
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   return (
@@ -44,7 +78,7 @@ export default function Landing() {
       <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
         <div
           className="absolute inset-0 bg-cover bg-center"
-          style={{ backgroundImage: `url(${HERO_IMAGE})`, transform: `translateY(${scrollY * 0.4}px)` }}
+          style={{ backgroundImage: `url(${toDisplayUrl(content.heroImageUrl)})`, transform: `translateY(${scrollY * 0.4}px)` }}
         />
         <div className="absolute inset-0 bg-gradient-to-br from-blue-900/90 via-blue-800/80 to-blue-900/90" />
 
@@ -67,14 +101,14 @@ export default function Landing() {
               <UBLogo size="lg" showText={false} variant="light" />
             </div>
             <div className="inline-block bg-yellow-500 text-blue-900 text-xs font-bold px-4 py-1.5 rounded-full uppercase tracking-wider mb-4">
-              University of Bohol
+              {content.heroBadge}
             </div>
             <h1 className="text-5xl md:text-7xl font-black mb-4 text-white leading-tight">
-              Virtual Campus
-              <span className="text-yellow-400"> Companion</span>
+              {content.heroTitle}
+              <span className="text-yellow-400"> {content.heroTitleAccent}</span>
             </h1>
             <p className="text-xl md:text-2xl text-blue-100 mb-10 max-w-2xl mx-auto leading-relaxed">
-              Explore, navigate, and discover the University of Bohol campus through immersive 360° tours and interactive maps.
+              {content.heroSubtitle}
             </p>
           </motion.div>
 
@@ -107,7 +141,9 @@ export default function Landing() {
       <section className="bg-yellow-500 py-12">
         <div className="max-w-5xl mx-auto px-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
-            {stats.map(({ label, value, icon: Icon }, idx) => (
+            {content.stats.map(({ label, value }, idx) => {
+              const Icon = statIcons[idx] || Building2;
+              return (
               <motion.div
                 key={label}
                 initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.1 }}
@@ -118,7 +154,7 @@ export default function Landing() {
                 <div className="text-3xl font-black">{value}</div>
                 <div className="text-sm font-semibold opacity-80">{label}</div>
               </motion.div>
-            ))}
+            )})}
           </div>
         </div>
       </section>
@@ -165,10 +201,10 @@ export default function Landing() {
             <motion.div
               initial={{ opacity: 0, x: -30 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true }}
             >
-              <div className="inline-block bg-red-100 text-red-700 text-xs font-bold px-4 py-1.5 rounded-full uppercase tracking-wider mb-4">360° Virtual Tours</div>
-              <h2 className="text-4xl font-black text-blue-900 mb-4">Explore Campus Without Leaving Home</h2>
+              <div className="inline-block bg-red-100 text-red-700 text-xs font-bold px-4 py-1.5 rounded-full uppercase tracking-wider mb-4">{content.campusSectionBadge}</div>
+              <h2 className="text-4xl font-black text-blue-900 mb-4">{content.campusSectionTitle}</h2>
               <p className="text-gray-500 mb-6 leading-relaxed">
-                Navigate through our immersive panoramic tours of all major buildings. Click hotspots to walk through corridors, visit labs, and discover hidden gems of the UB campus.
+                {content.campusSectionBody}
               </p>
               <div className="space-y-3 mb-8">
                 {["Panoramic 360° photo & video tours", "Interactive navigation hotspots", "Building-by-building exploration", "Works on any device"].map(item => (
@@ -190,15 +226,15 @@ export default function Landing() {
               className="relative"
             >
               <div className="rounded-3xl overflow-hidden shadow-2xl">
-                <img src={CAMPUS_IMAGE} alt="UB Campus" className="w-full h-80 object-cover" />
+                <img src={toDisplayUrl(content.campusImageUrl)} alt="UB Campus" className="w-full h-80 object-cover" />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent rounded-3xl" />
                 <div className="absolute bottom-4 left-4 right-4 flex items-center gap-3 bg-white/90 backdrop-blur rounded-xl p-3">
                   <div className="w-8 h-8 bg-blue-700 rounded-full flex items-center justify-center">
                     <Camera size={16} className="text-white" />
                   </div>
                   <div>
-                    <p className="font-semibold text-gray-800 text-sm">Main Administration Building</p>
-                    <p className="text-gray-500 text-xs">Click to start tour →</p>
+                    <p className="font-semibold text-gray-800 text-sm">{content.campusCardTitle}</p>
+                    <p className="text-gray-500 text-xs">{content.campusCardSubtitle}</p>
                   </div>
                   <div className="ml-auto flex">
                     {[1,2,3,4,5].map(s => <Star key={s} size={12} className="text-yellow-500 fill-yellow-500" />)}
@@ -214,14 +250,14 @@ export default function Landing() {
       <section className="py-20 bg-blue-800 text-white">
         <div className="max-w-4xl mx-auto px-4 text-center">
           <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }}>
-            <h2 className="text-4xl font-black mb-4">Ready to Explore UB Campus?</h2>
-            <p className="text-blue-200 mb-8 text-lg">Sign up for free and unlock the full campus experience with your student or staff account.</p>
+            <h2 className="text-4xl font-black mb-4">{content.ctaTitle}</h2>
+            <p className="text-blue-200 mb-8 text-lg">{content.ctaBody}</p>
             <div className="flex flex-wrap gap-4 justify-center">
-              <Link to="/signup" className="bg-yellow-500 hover:bg-yellow-400 text-blue-900 font-bold px-8 py-4 rounded-xl transition-all hover:scale-105 text-lg">
-                Get Started Free
+              <Link to={content.ctaPrimaryTo} className="bg-yellow-500 hover:bg-yellow-400 text-blue-900 font-bold px-8 py-4 rounded-xl transition-all hover:scale-105 text-lg">
+                {content.ctaPrimaryLabel}
               </Link>
-              <Link to="/map" className="border-2 border-white hover:bg-white hover:text-blue-900 text-white font-bold px-8 py-4 rounded-xl transition-all text-lg">
-                View Campus Map
+              <Link to={content.ctaSecondaryTo} className="border-2 border-white hover:bg-white hover:text-blue-900 text-white font-bold px-8 py-4 rounded-xl transition-all text-lg">
+                {content.ctaSecondaryLabel}
               </Link>
             </div>
           </motion.div>

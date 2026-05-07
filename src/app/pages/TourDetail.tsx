@@ -1,21 +1,34 @@
-import React, { useEffect, useState } from "react";
-import { useParams, Link, useNavigate } from "react-router";
+import React, { useEffect, useMemo, useState } from "react";
+import { useParams, Link, useNavigate, useSearchParams } from "react-router";
 import { motion } from "motion/react";
-import { ArrowLeft, MapPin, Building2, ChevronRight, Camera, Lock, Info } from "lucide-react";
+import { ArrowLeft, MapPin, Building2, ChevronRight, Camera, Lock, Info, PlusCircle } from "lucide-react";
 import { getBuilding, getPanoramas, logActivity } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { PanoramaViewer } from "../components/tour/PanoramaViewer";
+import { VirtualTourViewer } from "../components/tour/VirtualTourViewer";
+
+const SERVER_URL = "http://localhost:3001";
+const resolveImageUrl = (url?: string) => {
+  if (!url) return "";
+  if (url.startsWith("http")) return url;
+  return `${SERVER_URL}${url}`;
+};
 
 export default function TourDetail() {
   const { buildingId } = useParams<{ buildingId: string }>();
   const { user, role } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const requestedPanoId = searchParams.get("pano");
 
   const [building, setBuilding] = useState<any>(null);
   const [panoramas, setPanoramas] = useState<any[]>([]);
   const [currentPano, setCurrentPano] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [restricted, setRestricted] = useState(false);
+  const [allPanosCache, setAllPanosCache] = useState<any[] | null>(null);
+
+  const buildingPanoIds = useMemo(() => new Set(panoramas.map((p) => p.id)), [panoramas]);
 
   useEffect(() => {
     if (!buildingId) return;
@@ -25,7 +38,10 @@ export default function TourDetail() {
     ]).then(([b, panos]) => {
       setBuilding(b);
       setPanoramas(panos);
-      if (panos.length > 0) setCurrentPano(panos[0]);
+      if (panos.length > 0) {
+        const requested = requestedPanoId ? panos.find((p: any) => p.id === requestedPanoId) : null;
+        setCurrentPano(requested || panos[0]);
+      }
 
       // Check sensitivity
       if (b.sensitivityLevel === "staff" && role !== "staff" && role !== "admin") {
@@ -38,14 +54,40 @@ export default function TourDetail() {
     }).catch(() => {
       // Server unavailable — show empty state gracefully
     }).finally(() => setLoading(false));
-  }, [buildingId, role]);
+  }, [buildingId, role, requestedPanoId]);
+
+  const ensureAllPanos = async () => {
+    if (allPanosCache) return allPanosCache;
+    const all = await getPanoramas().catch(() => []);
+    setAllPanosCache(all);
+    return all;
+  };
+
+  const jumpToPano = async (targetPanoId: string) => {
+    // If it exists in the current building, just switch.
+    const local = panoramas.find((p) => p.id === targetPanoId);
+    if (local) {
+      setCurrentPano(local);
+      return;
+    }
+
+    // Otherwise, find it globally and navigate to its building tour page with ?pano=.
+    const all = await ensureAllPanos();
+    const target = all.find((p: any) => p.id === targetPanoId);
+    if (!target?.buildingId) return;
+
+    navigate(`/tours/${target.buildingId}?pano=${encodeURIComponent(targetPanoId)}`);
+  };
 
   const handleHotspotClick = (targetPanoId: string) => {
-    const target = panoramas.find(p => p.id === targetPanoId);
-    if (target) {
-      setCurrentPano(target);
-      if (user) logActivity({ action: "hotspot_click", userId: user.id, buildingId, details: { targetPanoId } }).catch(() => {});
-    }
+    void jumpToPano(targetPanoId);
+    if (user) logActivity({ action: "hotspot_click", userId: user.id, buildingId, details: { targetPanoId } }).catch(() => {});
+  };
+
+  const handleTourNodeChange = (panoId: string) => {
+    const target = panoramas.find(p => p.id === panoId);
+    if (target) setCurrentPano(target);
+    if (user) logActivity({ action: "virtual_tour_node", userId: user.id, buildingId, details: { panoId } }).catch(() => {});
   };
 
   if (loading) return (
@@ -100,7 +142,21 @@ export default function TourDetail() {
         <div className="lg:col-span-2 space-y-4">
           {/* Panorama Viewer */}
           <div className="h-80 md:h-[500px] rounded-2xl overflow-hidden shadow-2xl">
-            {currentPano ? (
+            {panoramas.length > 1 ? (
+              <div className="relative h-full w-full">
+                <VirtualTourViewer
+                  buildingName={building.name}
+                  lng={building.lng}
+                  lat={building.lat}
+                  panoramas={panoramas}
+                  activePanoId={currentPano?.id}
+                  onExternalHotspotTarget={(targetPanoId) => {
+                    void jumpToPano(targetPanoId);
+                  }}
+                  onNodeChange={handleTourNodeChange}
+                />
+              </div>
+            ) : currentPano ? (
               <PanoramaViewer
                 imageUrl={currentPano.imageUrl}
                 name={currentPano.name}
@@ -108,11 +164,50 @@ export default function TourDetail() {
                 onHotspotClick={handleHotspotClick}
               />
             ) : (
-              <div className="h-full bg-gray-200 flex items-center justify-center rounded-2xl">
-                <div className="text-center text-gray-400">
-                  <Camera size={48} className="mx-auto mb-2" />
-                  <p>No panorama available</p>
-                </div>
+              // Fallback: show building image or a styled empty state
+              <div className="h-full rounded-2xl overflow-hidden relative bg-gray-900">
+                {building?.imageUrl ? (
+                  <>
+                    <img
+                      src={resolveImageUrl(building.imageUrl)}
+                      alt={building.name}
+                      className="w-full h-full object-cover opacity-80"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+                    <div className="absolute bottom-0 left-0 right-0 p-5">
+                      <div className="flex items-center gap-2 text-white/80 text-sm mb-1">
+                        <Camera size={16} />
+                        <span>No 360° panorama yet</span>
+                      </div>
+                      <p className="text-white font-black text-xl">{building.name}</p>
+                      <p className="text-white/70 text-xs mt-1">Showing building preview image</p>
+                    </div>
+                    {(role === "admin" || role === "staff") && (
+                      <div className="absolute top-4 right-4">
+                        <Link
+                          to="/admin/panoramas"
+                          className="flex items-center gap-1.5 bg-yellow-500 hover:bg-yellow-400 text-blue-900 text-xs font-black px-3 py-1.5 rounded-full shadow-lg transition-colors"
+                        >
+                          <PlusCircle size={13} /> Add Panorama
+                        </Link>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="h-full flex items-center justify-center">
+                    <div className="text-center text-gray-400">
+                      <Camera size={48} className="mx-auto mb-2" />
+                      <p className="font-semibold">No panorama available</p>
+                      <p className="text-xs mt-1 text-gray-500">No image has been added for this building</p>
+                      {(role === "admin" || role === "staff") && (
+                        <Link to="/admin/panoramas"
+                          className="inline-flex items-center gap-1.5 mt-3 text-xs font-semibold text-blue-600 hover:underline">
+                          <PlusCircle size={13} /> Add Panorama in Admin Panel
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -129,7 +224,7 @@ export default function TourDetail() {
                     }`}
                     style={{ width: 100, height: 68 }}
                   >
-                    <img src={pano.imageUrl} alt={pano.name} className="w-full h-full object-cover" />
+                    <img src={resolveImageUrl(pano.imageUrl)} alt={pano.name} className="w-full h-full object-cover" />
                     <div className="absolute inset-0 bg-black/30 flex items-end p-1">
                       <span className="text-white text-[10px] font-semibold leading-tight">{pano.name}</span>
                     </div>
@@ -170,10 +265,10 @@ export default function TourDetail() {
           >
             <p className="font-bold text-blue-800 text-sm mb-2 flex items-center gap-2"><Info size={14} /> How to Navigate</p>
             <ul className="text-xs text-blue-600 space-y-1.5">
-              <li>🖱️ <strong>Drag</strong> the image to look around</li>
-              <li>⬅️ ➡️ Use <strong>arrow buttons</strong> to pan</li>
-              <li>🔵 Click <strong>yellow hotspots</strong> to move</li>
-              <li>⛶ <strong>Fullscreen</strong> button for best experience</li>
+              <li>🖱️ <strong>Drag</strong> to look around (Ctrl + scroll to zoom)</li>
+              <li>🧭 Use the <strong>top navbar</strong> for zoom/move/gallery/fullscreen</li>
+              <li>➡️ Follow the <strong>tour arrows</strong> between viewpoints (GPS mode)</li>
+              <li>🔵 Click <strong>yellow hotspots</strong> to jump to a linked viewpoint</li>
             </ul>
           </motion.div>
 

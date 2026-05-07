@@ -1,7 +1,10 @@
 import React, { useEffect, useState } from "react";
 import { motion } from "motion/react";
-import { Users, RefreshCw, Shield, GraduationCap, Briefcase, Crown, Search } from "lucide-react";
-import { getUsers, updateUserRole } from "../../lib/api";
+import {
+  Users, RefreshCw, Shield, GraduationCap, Briefcase, Crown,
+  Search, Plus, Trash2, Edit2, X, Save, AlertCircle, Check, KeyRound
+} from "lucide-react";
+import { getUsers, updateUserRole, createUser, deleteUser, updateUser } from "../../lib/api";
 import { useAuth } from "../../context/AuthContext";
 
 const roleConfig: Record<string, { label: string; color: string; bg: string; icon: any }> = {
@@ -10,6 +13,17 @@ const roleConfig: Record<string, { label: string; color: string; bg: string; ico
   student: { label: "Student", color: "text-green-700", bg: "bg-green-100", icon: GraduationCap },
 };
 
+const Toast: React.FC<{ msg: string; type: "success" | "error" }> = ({ msg, type }) => (
+  <motion.div
+    initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}
+    className={`fixed top-6 right-6 z-50 flex items-center gap-2 px-5 py-3 rounded-2xl shadow-xl text-sm font-semibold text-white
+      ${type === "success" ? "bg-green-600" : "bg-red-600"}`}
+  >
+    {type === "success" ? <Check size={16} /> : <AlertCircle size={16} />}
+    {msg}
+  </motion.div>
+);
+
 export default function AdminUsers() {
   const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<any[]>([]);
@@ -17,6 +31,22 @@ export default function AdminUsers() {
   const [search, setSearch] = useState("");
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [roleFilter, setRoleFilter] = useState("all");
+  const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
+
+  // Create user modal
+  const [showCreate, setShowCreate] = useState(false);
+  const [createForm, setCreateForm] = useState({ name: "", email: "", password: "", role: "student" });
+  const [createLoading, setCreateLoading] = useState(false);
+  const [showPass, setShowPass] = useState(false);
+
+  // Edit modal
+  const [editingUser, setEditingUser] = useState<any | null>(null);
+  const [editForm, setEditForm] = useState({ name: "", email: "", role: "student", password: "" });
+
+  const showToast = (msg: string, type: "success" | "error" = "success") => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
+  };
 
   const load = () => {
     setLoading(true);
@@ -30,8 +60,46 @@ export default function AdminUsers() {
     try {
       await updateUserRole(userId, role);
       setUsers(prev => prev.map(u => u.id === userId ? { ...u, role } : u));
-    } catch (e) { console.error(e); }
+      showToast("Role updated!");
+    } catch (e: any) { showToast(e.message || "Update failed", "error"); }
     finally { setUpdatingId(null); }
+  };
+
+  const handleCreate = async () => {
+    if (!createForm.name || !createForm.email || !createForm.password) {
+      showToast("All fields are required", "error"); return;
+    }
+    setCreateLoading(true);
+    try {
+      await createUser(createForm);
+      showToast("User created successfully!");
+      setShowCreate(false);
+      setCreateForm({ name: "", email: "", password: "", role: "student" });
+      load();
+    } catch (e: any) { showToast(e.message || "Create failed", "error"); }
+    finally { setCreateLoading(false); }
+  };
+
+  const handleEditSave = async () => {
+    if (!editingUser) return;
+    setUpdatingId(editingUser.id);
+    try {
+      await updateUser(editingUser.id, editForm);
+      showToast("User updated!");
+      setEditingUser(null);
+      load();
+    } catch (e: any) { showToast(e.message || "Update failed", "error"); }
+    finally { setUpdatingId(null); }
+  };
+
+  const handleDelete = async (userId: string) => {
+    if (userId === currentUser?.id) { showToast("Cannot delete your own account", "error"); return; }
+    if (!confirm("Permanently delete this user? This cannot be undone.")) return;
+    try {
+      await deleteUser(userId);
+      showToast("User deleted!");
+      load();
+    } catch (e: any) { showToast(e.message || "Delete failed", "error"); }
   };
 
   const filtered = users.filter(u => {
@@ -42,15 +110,125 @@ export default function AdminUsers() {
 
   return (
     <div className="space-y-5">
+      {toast && <Toast msg={toast.msg} type={toast.type} />}
+
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-2xl font-black text-gray-800">User Management</h2>
-          <p className="text-gray-500 text-sm">Manage user accounts and role assignments</p>
+          <p className="text-gray-500 text-sm">Manage accounts, roles, and access</p>
         </div>
-        <button onClick={load} className="flex items-center gap-2 border-2 border-gray-200 text-gray-600 font-semibold px-4 py-2 rounded-xl hover:bg-gray-50 text-sm">
-          <RefreshCw size={15} /> Refresh
-        </button>
+        <div className="flex gap-3">
+          <button onClick={load} className="flex items-center gap-2 border-2 border-gray-200 text-gray-600 font-semibold px-4 py-2 rounded-xl hover:bg-gray-50 text-sm">
+            <RefreshCw size={15} /> Refresh
+          </button>
+          <button onClick={() => setShowCreate(true)}
+            className="flex items-center gap-2 bg-blue-700 hover:bg-blue-800 text-white font-semibold px-4 py-2.5 rounded-xl text-sm">
+            <Plus size={16} /> New User
+          </button>
+        </div>
       </div>
+
+      {/* Create Modal */}
+      {showCreate && (
+        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}
+          className="bg-white rounded-2xl border-2 border-blue-200 shadow-lg p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-black text-gray-800">Create New User</h3>
+            <button onClick={() => setShowCreate(false)}><X size={18} className="text-gray-400 hover:text-gray-600" /></button>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-semibold text-gray-700 block mb-1">Full Name *</label>
+              <input value={createForm.name} onChange={e => setCreateForm(f => ({ ...f, name: e.target.value }))}
+                placeholder="Juan dela Cruz"
+                className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-700 block mb-1">Email *</label>
+              <input type="email" value={createForm.email} onChange={e => setCreateForm(f => ({ ...f, email: e.target.value }))}
+                placeholder="user@ub.edu.ph"
+                className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-700 block mb-1">Password *</label>
+              <div className="relative">
+                <input type={showPass ? "text" : "password"} value={createForm.password}
+                  onChange={e => setCreateForm(f => ({ ...f, password: e.target.value }))}
+                  placeholder="Min 6 characters"
+                  className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none text-sm pr-10" />
+                <button type="button" onClick={() => setShowPass(!showPass)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
+                  <KeyRound size={15} />
+                </button>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-700 block mb-1">Role</label>
+              <select value={createForm.role} onChange={e => setCreateForm(f => ({ ...f, role: e.target.value }))}
+                className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none text-sm">
+                <option value="student">Student</option>
+                <option value="staff">Staff</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <button onClick={handleCreate} disabled={createLoading}
+              className="flex items-center gap-2 bg-blue-700 hover:bg-blue-800 disabled:opacity-50 text-white font-semibold px-5 py-2.5 rounded-xl text-sm">
+              {createLoading ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={15} />}
+              Create User
+            </button>
+            <button onClick={() => setShowCreate(false)} className="px-5 py-2.5 border-2 border-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 text-sm">Cancel</button>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Edit Modal */}
+      {editingUser && (
+        <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }}
+          className="bg-white rounded-2xl border-2 border-purple-200 shadow-lg p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-black text-gray-800">Edit User: {editingUser.name}</h3>
+            <button onClick={() => setEditingUser(null)}><X size={18} className="text-gray-400 hover:text-gray-600" /></button>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-semibold text-gray-700 block mb-1">Full Name</label>
+              <input value={editForm.name} onChange={e => setEditForm(f => ({ ...f, name: e.target.value }))}
+                className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-700 block mb-1">Email</label>
+              <input type="email" value={editForm.email} onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))}
+                className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-700 block mb-1">New Password (leave blank to keep)</label>
+              <input type="password" value={editForm.password} onChange={e => setEditForm(f => ({ ...f, password: e.target.value }))}
+                placeholder="Leave blank to keep current"
+                className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none text-sm" />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-gray-700 block mb-1">Role</label>
+              <select value={editForm.role} onChange={e => setEditForm(f => ({ ...f, role: e.target.value }))}
+                className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none text-sm">
+                <option value="student">Student</option>
+                <option value="staff">Staff</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+          </div>
+          <div className="flex gap-3">
+            <button onClick={handleEditSave} disabled={!!updatingId}
+              className="flex items-center gap-2 bg-purple-700 hover:bg-purple-800 disabled:opacity-50 text-white font-semibold px-5 py-2.5 rounded-xl text-sm">
+              {updatingId ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={15} />}
+              Save Changes
+            </button>
+            <button onClick={() => setEditingUser(null)} className="px-5 py-2.5 border-2 border-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 text-sm">Cancel</button>
+          </div>
+        </motion.div>
+      )}
 
       {/* Stats */}
       <div className="grid sm:grid-cols-3 gap-4">
@@ -59,7 +237,7 @@ export default function AdminUsers() {
           const count = users.filter(u => u.role === role).length;
           return (
             <button key={role} onClick={() => setRoleFilter(roleFilter === role ? "all" : role)}
-              className={`bg-white rounded-xl border-2 p-4 flex items-center gap-3 transition-all hover:shadow-md ${roleFilter === role ? "border-blue-500" : "border-gray-100"}`}>
+              className={`bg-white rounded-xl border-2 p-4 flex items-center gap-3 transition-all hover:shadow-md ${roleFilter === role ? "border-blue-500 shadow-md" : "border-gray-100"}`}>
               <div className={`${cfg.bg} p-2.5 rounded-xl`}><Icon size={20} className={cfg.color} /></div>
               <div><p className="font-black text-gray-800 text-xl">{count}</p><p className={`text-sm font-semibold ${cfg.color}`}>{cfg.label}s</p></div>
             </button>
@@ -72,8 +250,7 @@ export default function AdminUsers() {
         <Search size={17} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
         <input value={search} onChange={e => setSearch(e.target.value)}
           placeholder="Search by name or email..."
-          className="w-full pl-10 pr-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none"
-        />
+          className="w-full pl-10 pr-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none" />
       </div>
 
       {/* Table */}
@@ -84,16 +261,18 @@ export default function AdminUsers() {
               <tr className="bg-gray-50 border-b border-gray-100">
                 <th className="text-left px-5 py-3 font-bold text-gray-600">User</th>
                 <th className="text-left px-5 py-3 font-bold text-gray-600">Email</th>
-                <th className="text-left px-5 py-3 font-bold text-gray-600">Current Role</th>
+                <th className="text-left px-5 py-3 font-bold text-gray-600">Role</th>
                 <th className="text-left px-5 py-3 font-bold text-gray-600">Joined</th>
-                <th className="text-left px-5 py-3 font-bold text-gray-600">Change Role</th>
+                <th className="text-left px-5 py-3 font-bold text-gray-600">Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                Array.from({length:5}).map((_,i) => (
+                Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i} className="border-b border-gray-50">
-                    {Array.from({length:5}).map((_,j) => <td key={j} className="px-5 py-4"><div className="h-4 bg-gray-200 rounded animate-pulse" /></td>)}
+                    {Array.from({ length: 5 }).map((_, j) => (
+                      <td key={j} className="px-5 py-4"><div className="h-4 bg-gray-200 rounded animate-pulse" /></td>
+                    ))}
                   </tr>
                 ))
               ) : filtered.map((u, idx) => {
@@ -120,9 +299,11 @@ export default function AdminUsers() {
                         <Icon size={11} /> {cfg.label}
                       </span>
                     </td>
-                    <td className="px-5 py-4 text-gray-500 text-xs">{u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "—"}</td>
+                    <td className="px-5 py-4 text-gray-500 text-xs">
+                      {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "—"}
+                    </td>
                     <td className="px-5 py-4">
-                      <div className="relative">
+                      <div className="flex items-center gap-2">
                         <select
                           value={u.role}
                           onChange={e => handleRoleChange(u.id, e.target.value)}
@@ -133,10 +314,18 @@ export default function AdminUsers() {
                           <option value="staff">Staff</option>
                           <option value="admin">Admin</option>
                         </select>
-                        {updatingId === u.id && (
-                          <div className="absolute right-2 top-1/2 -translate-y-1/2">
-                            <div className="w-3 h-3 border-2 border-blue-600/30 border-t-blue-600 rounded-full animate-spin" />
-                          </div>
+                        <button onClick={() => {
+                          setEditingUser(u);
+                          setEditForm({ name: u.name || "", email: u.email || "", role: u.role || "student", password: "" });
+                        }}
+                          className="p-1.5 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors" title="Edit user">
+                          <Edit2 size={13} />
+                        </button>
+                        {u.id !== currentUser?.id && (
+                          <button onClick={() => handleDelete(u.id)}
+                            className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors" title="Delete user">
+                            <Trash2 size={13} />
+                          </button>
                         )}
                       </div>
                     </td>
@@ -147,7 +336,9 @@ export default function AdminUsers() {
           </table>
         </div>
         {!loading && filtered.length === 0 && (
-          <div className="text-center py-12 text-gray-400"><Users size={36} className="mx-auto mb-2 opacity-40" /><p>No users found</p></div>
+          <div className="text-center py-12 text-gray-400">
+            <Users size={36} className="mx-auto mb-2 opacity-40" /><p>No users found</p>
+          </div>
         )}
       </div>
       <p className="text-gray-400 text-xs text-center">Total: {users.length} users · Showing: {filtered.length}</p>
