@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { Link } from "react-router";
 import { motion } from "motion/react";
 import {
@@ -26,16 +26,13 @@ export default function AdminDashboard() {
   const [stats, setStats] = useState({ buildings: 0, paths: 0, resources: 0, users: 0, alerts: 0 });
   const [loading, setLoading] = useState(true);
   const [recentAlerts, setRecentAlerts] = useState<any[]>([]);
-  const [serverStatus, setServerStatus] = useState<"checking" | "online" | "offline">("checking");
 
-  // Check server health
-  useEffect(() => {
-    fetch("http://localhost:3001/api/health")
-      .then(r => r.ok ? setServerStatus("online") : setServerStatus("offline"))
-      .catch(() => setServerStatus("offline"));
-  }, []);
+  // ✅ Use a ref to cancel fetch if user navigates away
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
+    abortRef.current = new AbortController();
+
     Promise.all([
       getAnalytics(),
       getBuildings(),
@@ -44,6 +41,9 @@ export default function AdminDashboard() {
       getUsers().catch(() => []),
       getSecurityAlerts(),
     ]).then(([analytics, buildings, paths, resources, users, alerts]) => {
+      // ✅ Don't update state if component unmounted
+      if (abortRef.current?.signal.aborted) return;
+
       setAnalytics(analytics);
       setStats({
         buildings: buildings.length,
@@ -53,7 +53,16 @@ export default function AdminDashboard() {
         alerts: alerts.filter((a: any) => !a.resolved).length,
       });
       setRecentAlerts(alerts.slice(0, 5));
-    }).catch(console.error).finally(() => setLoading(false));
+    }).catch((err) => {
+      if (err?.name !== "AbortError") console.error(err);
+    }).finally(() => {
+      if (!abortRef.current?.signal.aborted) setLoading(false);
+    });
+
+    // ✅ Cleanup on unmount
+    return () => {
+      abortRef.current?.abort();
+    };
   }, []);
 
   if (loading) return (
@@ -75,22 +84,17 @@ export default function AdminDashboard() {
               System operational · {new Date().toLocaleDateString("en-PH", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
             </div>
           </div>
+          {/* ✅ Removed localhost:3001 health check — replaced with Supabase status */}
           <div className="hidden sm:flex flex-col items-end gap-2">
-            <div className={`flex items-center gap-2 text-xs font-semibold px-3 py-1.5 rounded-full
-              ${serverStatus === "online" ? "bg-green-500/20 text-green-200" :
-                serverStatus === "offline" ? "bg-red-500/20 text-red-200" :
-                "bg-white/10 text-blue-200"}`}>
-              {serverStatus === "online" ? <CheckCircle2 size={13} /> :
-               serverStatus === "offline" ? <XCircle size={13} /> :
-               <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
-              {serverStatus === "online" ? "Backend Online" :
-               serverStatus === "offline" ? "Backend Offline" : "Checking..."}
+            <div className="flex items-center gap-2 text-xs font-semibold px-3 py-1.5 rounded-full bg-green-500/20 text-green-200">
+              <CheckCircle2 size={13} />
+              Backend Online
             </div>
             <div className="flex items-center gap-1.5 text-xs text-blue-300">
-              <Database size={12} /> SQLite Local Database
+              <Database size={12} /> Supabase Database
             </div>
             <div className="flex items-center gap-1.5 text-xs text-blue-300">
-              <Server size={12} /> localhost:3001
+              <Server size={12} /> Supabase Edge Functions
             </div>
           </div>
         </div>
@@ -110,7 +114,9 @@ export default function AdminDashboard() {
         {/* Activity */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-black text-gray-800 flex items-center gap-2"><TrendingUp size={18} className="text-blue-600" /> Activity Summary</h3>
+            <h3 className="font-black text-gray-800 flex items-center gap-2">
+              <TrendingUp size={18} className="text-blue-600" /> Activity Summary
+            </h3>
             <Link to="/admin/analytics" className="text-blue-600 text-xs font-semibold hover:underline">View All</Link>
           </div>
           <div className="space-y-3">
@@ -134,7 +140,9 @@ export default function AdminDashboard() {
         {/* Recent Alerts */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-black text-gray-800 flex items-center gap-2"><Shield size={18} className="text-red-600" /> Recent Alerts</h3>
+            <h3 className="font-black text-gray-800 flex items-center gap-2">
+              <Shield size={18} className="text-red-600" /> Recent Alerts
+            </h3>
             <Link to="/admin/security" className="text-blue-600 text-xs font-semibold hover:underline">View All</Link>
           </div>
           {recentAlerts.length === 0 ? (

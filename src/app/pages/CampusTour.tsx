@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import { Link, useSearchParams } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
 import {
@@ -35,27 +35,45 @@ export default function CampusTour() {
   const [routeError, setRouteError] = useState<string | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
 
+  // ✅ Abort refs for cleanup
+  const dataAbortRef = useRef<AbortController | null>(null);
+  const routeAbortRef = useRef<AbortController | null>(null);
+
+  // ✅ Fetch panoramas + buildings once
   useEffect(() => {
+    dataAbortRef.current = new AbortController();
     setLoading(true);
+
     Promise.all([
       getPanoramas(),
       getBuildings(),
       getCampusTourSettings().catch(() => ({ content: { startPanoId: null }, updatedAt: null })),
     ])
       .then(([p, b, s]) => {
+        if (dataAbortRef.current?.signal.aborted) return;
         setPanos(p as Pano[]);
         setBuildings(b as Building[]);
         const sid = s?.content?.startPanoId || (p as Pano[])[0]?.id || null;
         setStartPanoId(sid);
         setActivePanoId(sid || undefined);
       })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (err?.name !== "AbortError") console.error(err);
+      })
+      .finally(() => {
+        if (!dataAbortRef.current?.signal.aborted) setLoading(false);
+      });
 
     if (user) logActivity({ action: "campus_tour_view", userId: user.id }).catch(() => {});
-  }, []);
 
-  // Compute guided route when ?to= changes and we know the start
+    // ✅ Cleanup on unmount
+    return () => {
+      dataAbortRef.current?.abort();
+      routeAbortRef.current?.abort();
+    };
+  }, []); // ✅ Fetch once only
+
+  // ✅ Compute guided route when ?to= changes
   useEffect(() => {
     if (!startPanoId || !toPanoId) {
       setRouteSteps(null);
@@ -68,10 +86,17 @@ export default function CampusTour() {
       setActivePanoId(toPanoId);
       return;
     }
+
+    // ✅ Cancel any previous route fetch
+    routeAbortRef.current?.abort();
+    routeAbortRef.current = new AbortController();
+
     setRouteLoading(true);
     setRouteError(null);
+
     getTourRoute(startPanoId, toPanoId)
       .then((r) => {
+        if (routeAbortRef.current?.signal.aborted) return;
         if (!r.found) {
           setRouteError("No arrow path found between these panoramas. Ask an admin to add hotspots.");
           setRouteSteps(null);
@@ -81,10 +106,13 @@ export default function CampusTour() {
         }
       })
       .catch((e) => {
+        if (e?.name === "AbortError") return;
         setRouteError(e?.message || "Could not compute route");
         setRouteSteps(null);
       })
-      .finally(() => setRouteLoading(false));
+      .finally(() => {
+        if (!routeAbortRef.current?.signal.aborted) setRouteLoading(false);
+      });
   }, [startPanoId, toPanoId]);
 
   const buildingsById = useMemo(() => {
@@ -288,7 +316,7 @@ export default function CampusTour() {
                             <strong>{step.toName}</strong>
                             {step.label && (
                               <em className="block text-[10px] text-gray-500 not-italic">
-                                Follow: “{step.label}”
+                                Follow: "{step.label}"
                               </em>
                             )}
                           </span>

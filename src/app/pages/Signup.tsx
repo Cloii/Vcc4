@@ -21,57 +21,47 @@ export default function Signup() {
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError("");
-    if (form.password !== form.confirmPassword) return setError("Passwords do not match");
-    if (form.password.length < 6) return setError("Password must be at least 6 characters");
-    setLoading(true);
-    try {
-      const { data, error } = await supabase.auth.signUp({
-        email: form.email,
-        password: form.password,
-        options: { data: { name: form.name } },
+  e.preventDefault();
+  setError("");
+  if (form.password !== form.confirmPassword) return setError("Passwords do not match");
+  if (form.password.length < 6) return setError("Password must be at least 6 characters");
+  setLoading(true);
+
+  try {
+    // 1. Sign up the user
+    const { data, error: signUpError } = await supabase.auth.signUp({
+      email: form.email,
+      password: form.password,
+      options: { data: { name: form.name } },
+    });
+    if (signUpError) throw signUpError;
+    if (!data.user) throw new Error("Signup failed");
+
+    // 2. Sign in immediately to get a session
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+      email: form.email,
+      password: form.password,
+    });
+    if (signInError) throw signInError;
+
+    // 3. Assign role via Supabase RPC (works locally + production)
+    if (form.role === "admin" || form.role === "staff") {
+      const { error: rpcError } = await supabase.rpc("assign_role", {
+        requested_role: form.role,
+        code: form.adminCode,
       });
-      if (error) throw error;
-
-      // If staff/admin selected, call serverless role assignment (codes stored as env vars on Vercel).
-      if (form.role === "admin" || form.role === "staff") {
-        // Ensure we have a session access token (signUp may return null session depending on email confirmation settings).
-        let accessToken = data.session?.access_token;
-        if (!accessToken) {
-          const { data: signInData, error: signInErr } = await supabase.auth.signInWithPassword({
-            email: form.email,
-            password: form.password,
-          });
-          if (signInErr || !signInData.session?.access_token) {
-            throw new Error(
-              "Your account was created, but admin/staff role can only be applied after you can sign in (email confirmation may be enabled). Confirm your email, then sign in and try again."
-            );
-          }
-          accessToken = signInData.session.access_token;
-        }
-        const res = await fetch("/api/set-role", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify({ role: form.role, code: form.adminCode }),
-        });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({ error: res.statusText }));
-          throw new Error(err.error || "Failed to apply role");
-        }
-      }
-
-      await signIn(form.email, form.password);
-      navigate("/");
-    } catch (err: any) {
-      setError(err.message || "Registration failed");
-    } finally {
-      setLoading(false);
+      if (rpcError) throw new Error("Invalid access code");
     }
-  };
+
+    // 4. Navigate
+    await signIn(form.email, form.password);
+    navigate("/");
+  } catch (err: any) {
+    setError(err.message || "Registration failed");
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-900 via-blue-800 to-blue-900 flex items-center justify-center p-4 py-8">

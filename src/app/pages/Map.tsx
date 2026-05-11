@@ -65,6 +65,9 @@ export default function MapPage() {
   const polylinesRef = useRef<L.Polyline[]>([]);
   const routePolylineRef = useRef<L.Polyline | null>(null);
 
+  // ✅ Abort ref for data fetch cleanup
+  const dataAbortRef = useRef<AbortController | null>(null);
+
   const [buildings, setBuildings] = useState<any[]>([]);
   const [paths, setPaths] = useState<any[]>([]);
   const [panoramas, setPanoramas] = useState<MapPanorama[]>([]);
@@ -80,7 +83,7 @@ export default function MapPage() {
   const [search, setSearch] = useState("");
   const [showSearchResults, setShowSearchResults] = useState(false);
 
-  // Initialize Leaflet map
+  // ✅ Initialize Leaflet map — already had cleanup, kept as-is
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
     const map = L.map(mapContainerRef.current, {
@@ -99,19 +102,42 @@ export default function MapPage() {
     };
   }, []);
 
-  // Load data
+  // ✅ Load data with abort cleanup
   useEffect(() => {
+    dataAbortRef.current = new AbortController();
+
     Promise.all([
       getBuildings(),
       getPaths(),
       getPanoramas().catch(() => []),
     ]).then(([b, p, panos]) => {
+      if (dataAbortRef.current?.signal.aborted) return;
+
       setBuildings(b);
-      setPaths(p);
-      setPanoramas(panos as MapPanorama[]);
-    }).catch(() => {
-      // Server unavailable — map still renders, just without data
+
+      // ✅ Normalize snake_case from Supabase → camelCase for path rendering
+      const normalizedPaths = (p as any[]).map(path => ({
+        ...path,
+        fromBuilding: path.from_building ?? path.fromBuilding,
+        toBuilding: path.to_building ?? path.toBuilding,
+      }));
+      setPaths(normalizedPaths);
+
+      // ✅ Normalize panoramas snake_case too
+      const normalizedPanos = (panos as any[]).map(pano => ({
+        ...pano,
+        buildingId: pano.building_id ?? pano.buildingId,
+        imageUrl: pano.image_url ?? pano.imageUrl,
+      }));
+      setPanoramas(normalizedPanos as MapPanorama[]);
+    }).catch((err) => {
+      if (err?.name !== "AbortError") console.error(err);
     });
+
+    // ✅ Cleanup on unmount
+    return () => {
+      dataAbortRef.current?.abort();
+    };
   }, []);
 
   // Build search results from buildings + panoramas
@@ -195,7 +221,6 @@ export default function MapPage() {
     if (!mapRef.current || buildings.length === 0) return;
     const map = mapRef.current;
 
-    // Remove old markers
     markersRef.current.forEach(m => m.remove());
     markersRef.current = [];
 
@@ -223,7 +248,6 @@ export default function MapPage() {
     if (!mapRef.current) return;
     const map = mapRef.current;
 
-    // Remove old polylines
     polylinesRef.current.forEach(p => p.remove());
     polylinesRef.current = [];
 
@@ -315,10 +339,7 @@ export default function MapPage() {
             {search && (
               <button
                 type="button"
-                onClick={() => {
-                  setSearch("");
-                  setShowSearchResults(false);
-                }}
+                onClick={() => { setSearch(""); setShowSearchResults(false); }}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 p-1"
                 title="Clear"
               >
@@ -347,11 +368,7 @@ export default function MapPage() {
                     }}
                     className="w-full text-left px-3 py-2 hover:bg-blue-50 flex items-start gap-2 border-b border-gray-50 last:border-0"
                   >
-                    <span
-                      className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                        r.type === "building" ? "bg-blue-100 text-blue-700" : "bg-yellow-100 text-yellow-800"
-                      }`}
-                    >
+                    <span className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${r.type === "building" ? "bg-blue-100 text-blue-700" : "bg-yellow-100 text-yellow-800"}`}>
                       {r.type === "building" ? <Building2 size={14} /> : <Camera size={14} />}
                     </span>
                     <span className="min-w-0">

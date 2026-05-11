@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { Link } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
 import { Search, Filter, Phone, Clock, MapPin, BookOpen, Building2, ChevronRight, X } from "lucide-react";
@@ -21,13 +21,33 @@ export default function Directory() {
   const [category, setCategory] = useState("all");
   const [selected, setSelected] = useState<any>(null);
 
+  // ✅ Abort controller ref for cleanup
+  const abortRef = useRef<AbortController | null>(null);
+
   useEffect(() => {
+    abortRef.current = new AbortController();
+
     Promise.all([getResources(), getBuildings()])
-      .then(([r, b]) => { setResources(r); setBuildings(b); })
-      .catch(console.error)
-      .finally(() => setLoading(false));
+      .then(([r, b]) => {
+        if (abortRef.current?.signal.aborted) return;
+        setResources(r);
+        setBuildings(b);
+      })
+      .catch((err) => {
+        if (err?.name !== "AbortError") console.error(err);
+      })
+      .finally(() => {
+        if (!abortRef.current?.signal.aborted) setLoading(false);
+      });
+
+    // ✅ Log activity only once, don't re-run on user change
     if (user) logActivity({ action: "directory_view", userId: user.id }).catch(() => {});
-  }, []);
+
+    // ✅ Cleanup on unmount
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []); // ✅ Empty deps — fetch once only
 
   const filtered = resources.filter(r => {
     const term = search.toLowerCase();
@@ -75,7 +95,7 @@ export default function Directory() {
 
           {/* Category pills */}
           <div className="flex gap-2 mb-5 flex-wrap">
-            {[{k:"all",label:"All",color:"bg-gray-800 text-white"}, ...Object.entries(categoryConfig).map(([k,v]) => ({k,label:v.label,color:category===k?"bg-blue-700 text-white":"bg-gray-100 text-gray-600"}))].map(({k,label,color}) => (
+            {[{k:"all",label:"All"}, ...Object.entries(categoryConfig).map(([k,v]) => ({k,label:v.label}))].map(({k,label}) => (
               <button key={k} onClick={() => setCategory(k)}
                 className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${category === k ? "bg-blue-700 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"}`}>
                 {label}
@@ -96,14 +116,17 @@ export default function Directory() {
             <div className="space-y-3">
               {filtered.map((r, idx) => {
                 const cfg = categoryConfig[r.category] || categoryConfig.services;
-                const bldg = getBuilding(r.buildingId);
+                const bldg = getBuilding(r.buildingId || r.building_id);
                 return (
                   <motion.div
                     key={r.id}
                     initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.04 }}
                   >
                     <button
-                      onClick={() => { setSelected(selected?.id === r.id ? null : r); if(user) logActivity({ action: "resource_view", userId: user.id, details: { resourceId: r.id } }).catch(()=>{}); }}
+                      onClick={() => {
+                        setSelected(selected?.id === r.id ? null : r);
+                        if (user) logActivity({ action: "resource_view", userId: user.id, details: { resourceId: r.id } }).catch(() => {});
+                      }}
                       className={`w-full text-left bg-white rounded-xl border-2 transition-all p-4 hover:shadow-md ${
                         selected?.id === r.id ? "border-blue-500 shadow-md" : "border-gray-100 hover:border-blue-200"
                       }`}
@@ -120,7 +143,7 @@ export default function Directory() {
                               <MapPin size={11} className="text-red-500" /> {r.location}
                             </span>
                             <span className="flex items-center gap-1 text-xs text-gray-500">
-                              <Clock size={11} className="text-blue-500" /> {r.operatingHours}
+                              <Clock size={11} className="text-blue-500" /> {r.operating_hours || r.operatingHours}
                             </span>
                           </div>
                         </div>
@@ -136,8 +159,8 @@ export default function Directory() {
                             <div className="mt-3 pt-3 border-t border-gray-100 grid sm:grid-cols-2 gap-3">
                               <div>
                                 <p className="text-xs font-bold text-gray-500 mb-1">CONTACT</p>
-                                <a href={`tel:${r.contactInfo}`} className="flex items-center gap-1.5 text-sm text-blue-700 font-medium hover:underline">
-                                  <Phone size={13} /> {r.contactInfo}
+                                <a href={`tel:${r.contact_info || r.contactInfo}`} className="flex items-center gap-1.5 text-sm text-blue-700 font-medium hover:underline">
+                                  <Phone size={13} /> {r.contact_info || r.contactInfo}
                                 </a>
                               </div>
                               {bldg && (
