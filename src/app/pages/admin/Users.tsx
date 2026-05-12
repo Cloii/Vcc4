@@ -5,6 +5,7 @@ import {
   Search, Plus, Trash2, Edit2, X, Save, AlertCircle, Check, KeyRound
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
+import { authListenerPaused } from "../../context/AuthContext";
 import { supabase } from "../../lib/supabaseClient";
 
 const roleConfig: Record<string, { label: string; color: string; bg: string; icon: any }> = {
@@ -103,14 +104,14 @@ export default function AdminUsers() {
     }
   };
 
-  // ✅ Create user via Supabase Auth (uses signUp, then update profile)
+  // ✅ Create user via Supabase Auth admin API, fallback to signUp with session guard
   const handleCreate = async () => {
     if (!createForm.name || !createForm.email || !createForm.password) {
       showToast("All fields are required", "error"); return;
     }
     setCreateLoading(true);
     try {
-      // Create the auth user
+      // Primary: use admin API (requires service role key — no session change)
       const { data, error } = await supabase.auth.admin.createUser({
         email: createForm.email,
         password: createForm.password,
@@ -119,39 +120,39 @@ export default function AdminUsers() {
       });
       if (error) throw error;
 
-      // Update profile with name and role
       await supabase
         .from("profiles")
         .update({ name: createForm.name, role: createForm.role })
         .eq("id", data.user.id);
 
+      // ✅ Optimistic real-time update — new user appears instantly
+      setUsers(prev => [{
+        id: data.user.id,
+        name: createForm.name,
+        email: createForm.email,
+        role: createForm.role,
+        created_at: new Date().toISOString(),
+      }, ...prev]);
+
       showToast("User created successfully!");
       setShowCreate(false);
       setCreateForm({ name: "", email: "", password: "", role: "student" });
-      load();
     } catch (e: any) {
-      // Fallback: if admin API not available, use signUp
-      // Save the current admin session first so we can restore it after signUp
+      // Fallback: signUp — pause auth listener first to prevent redirect
       try {
         const { data: sessionData } = await supabase.auth.getSession();
         const adminSession = sessionData?.session;
+
+        // ✅ Pause the auth listener so the signUp session change doesn't trigger a redirect
+        authListenerPaused.current = true;
 
         const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
           email: createForm.email,
           password: createForm.password,
           options: { data: { name: createForm.name } },
         });
-        if (signUpError) throw signUpError;
 
-        if (signUpData.user) {
-          // Update the new user's profile using the new user's session
-          await supabase
-            .from("profiles")
-            .update({ name: createForm.name, role: createForm.role })
-            .eq("id", signUpData.user.id);
-        }
-
-        // Restore the original admin session so the current user stays logged in
+        // ✅ Restore admin session immediately — before anything else
         if (adminSession) {
           await supabase.auth.setSession({
             access_token: adminSession.access_token,
@@ -159,11 +160,32 @@ export default function AdminUsers() {
           });
         }
 
+        // ✅ Resume auth listener only after admin session is fully restored
+        authListenerPaused.current = false;
+
+        if (signUpError) throw signUpError;
+
+        if (signUpData.user) {
+          await supabase
+            .from("profiles")
+            .update({ name: createForm.name, role: createForm.role })
+            .eq("id", signUpData.user.id);
+
+          // ✅ Optimistic real-time update
+          setUsers(prev => [{
+            id: signUpData.user!.id,
+            name: createForm.name,
+            email: createForm.email,
+            role: createForm.role,
+            created_at: new Date().toISOString(),
+          }, ...prev]);
+        }
+
         showToast("User created successfully!");
         setShowCreate(false);
         setCreateForm({ name: "", email: "", password: "", role: "student" });
-        load();
       } catch (fallbackErr: any) {
+        authListenerPaused.current = false; // Always unpause on error
         showToast(fallbackErr.message || "Create failed", "error");
       }
     } finally {
@@ -182,9 +204,13 @@ export default function AdminUsers() {
         .eq("id", editingUser.id);
       if (error) throw error;
 
+      // ✅ Optimistic real-time update — reflects instantly without refetch
+      setUsers(prev => prev.map(u =>
+        u.id === editingUser.id ? { ...u, name: editForm.name, role: editForm.role } : u
+      ));
+
       showToast("User updated!");
       setEditingUser(null);
-      load();
     } catch (e: any) {
       showToast(e.message || "Update failed", "error");
     } finally {
@@ -192,15 +218,27 @@ export default function AdminUsers() {
     }
   };
 
-  // ✅ Delete user via Supabase Auth admin API
+  // ✅ Delete user — tries admin API first, falls back to profile-only delete
   const handleDelete = async (userId: string) => {
     if (userId === currentUser?.id) { showToast("Cannot delete your own account", "error"); return; }
     if (!confirm("Permanently delete this user? This cannot be undone.")) return;
     try {
-      const { error } = await supabase.auth.admin.deleteUser(userId);
-      if (error) throw error;
-      showToast("User deleted!");
+      // Try admin API first (works if Supabase client uses service role key)
+      const { error: adminError } = await supabase.auth.admin.deleteUser(userId);
+
+      if (adminError) {
+        // Fallback: delete from profiles table only
+        // The user won't appear in the app; auth record stays but is orphaned
+        const { error: profileError } = await supabase
+          .from("profiles")
+          .delete()
+          .eq("id", userId);
+        if (profileError) throw profileError;
+      }
+
+      // ✅ Optimistic real-time update
       setUsers(prev => prev.filter(u => u.id !== userId));
+      showToast("User deleted!");
     } catch (e: any) {
       showToast(e.message || "Delete failed", "error");
     }

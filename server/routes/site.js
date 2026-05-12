@@ -70,7 +70,7 @@ router.get("/landing", (req, res) => {
 });
 
 // PUT /api/site/landing (admin/staff)
-router.put("/landing", requireAdmin, (req, res) => {
+router.put("/landing", requireAdmin, async (req, res) => {
   const { value: oldValue } = readContent("landing");
 
   const incoming = req.body?.content;
@@ -86,7 +86,7 @@ router.put("/landing", requireAdmin, (req, res) => {
   };
 
   const updatedAt = upsertContent("landing", merged);
-  logAudit(req.user, "UPDATE", "site_content", "landing", oldValue, merged);
+  await logAudit(req.user, "UPDATE", "site_content", "landing", oldValue, merged);
 
   res.json({ ok: true, content: merged, updatedAt });
 });
@@ -98,7 +98,7 @@ router.get("/campus-tour", (req, res) => {
 });
 
 // PUT /api/site/campus-tour (admin/staff)
-router.put("/campus-tour", requireAdmin, (req, res) => {
+router.put("/campus-tour", requireAdmin, async (req, res) => {
   const { value: oldValue } = readContent("campus_tour");
 
   const incoming = req.body?.content;
@@ -118,7 +118,7 @@ router.put("/campus-tour", requireAdmin, (req, res) => {
 
   const merged = { ...DEFAULT_CAMPUS_TOUR, startPanoId };
   const updatedAt = upsertContent("campus_tour", merged);
-  logAudit(req.user, "UPDATE", "site_content", "campus_tour", oldValue, merged);
+  await logAudit(req.user, "UPDATE", "site_content", "campus_tour", oldValue, merged);
 
   res.json({ ok: true, content: merged, updatedAt });
 });

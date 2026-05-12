@@ -74,7 +74,7 @@ router.post("/image", requireAdmin, (req, res) => {
     }
 
     const fileUrl = `/uploads/${req.file.filename}`;
-    logAudit(req.user, "UPLOAD", "file", req.file.filename, null, {
+    await logAudit(req.user, "UPLOAD", "file", req.file.filename, null, {
       originalName: req.file.originalname,
       size: req.file.size,
       url: fileUrl,

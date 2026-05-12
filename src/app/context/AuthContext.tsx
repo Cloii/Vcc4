@@ -21,6 +21,11 @@ const AuthContext = createContext<AuthContextType>({
   signIn: async () => {}, signOut: async () => {}, refreshRole: async () => {},
 });
 
+// ✅ Module-level flag: set to true to pause the auth listener during admin user creation.
+// This prevents onAuthStateChange from reacting to the temporary signUp session change
+// and redirecting the admin away from the dashboard.
+export const authListenerPaused = { current: false };
+
 export const useAuth = () => useContext(AuthContext);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -65,6 +70,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       setLoading(false);
       unsub = supabase.auth.onAuthStateChange(async (_evt, session) => {
+        // ✅ Skip if admin is in the middle of creating a new user via signUp fallback
+        if (authListenerPaused.current) return;
         const u = session?.user;
         if (!u) {
           setUser(null);

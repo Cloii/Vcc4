@@ -1,7 +1,12 @@
 import { Router } from "express";
 import { v4 as uuidv4 } from "uuid";
+import { createClient } from "@supabase/supabase-js";
 import db from "../db.js";
 import { requireAdmin } from "../middleware/auth.js";
+
+const supabaseUrl = process.env.VITE_SUPABASE_URL;
+const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY;
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 const router = Router();
 
@@ -71,40 +76,48 @@ router.get("/", requireAdmin, (req, res) => {
 // ── Audit Logs ─────────────────────────────────────────────────────────────────
 
 // GET /api/audit-logs
-router.get("/audit", requireAdmin, (req, res) => {
+router.get("/audit", requireAdmin, async (req, res) => {
   try {
     const { limit = 200, offset = 0, search = "", resourceType = "" } = req.query;
-    let query = `SELECT * FROM audit_logs WHERE 1=1`;
-    const params = [];
+    
+    let query = supabase.from("audit_logs").select("*", { count: "exact" });
+
+    // Add filters
     if (search) {
-      query += ` AND (action LIKE ? OR admin_email LIKE ? OR resource_type LIKE ?)`;
-      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+      query = query.or(`action.ilike.%${search}%,admin_email.ilike.%${search}%,resource_type.ilike.%${search}%`);
     }
     if (resourceType) {
-      query += ` AND resource_type = ?`;
-      params.push(resourceType);
+      query = query.eq("resource_type", resourceType);
     }
-    query += ` ORDER BY timestamp DESC LIMIT ? OFFSET ?`;
-    params.push(Number(limit), Number(offset));
 
-    const logs = db.prepare(query).all(...params);
-    const total = db.prepare(`SELECT COUNT(*) as cnt FROM audit_logs`).get();
+    // Order and paginate
+    query = query.order("timestamp", { ascending: false })
+      .range(Number(offset), Number(offset) + Number(limit) - 1);
+
+    const { data: logs, error, count } = await query;
+
+    if (error) {
+      console.error("Audit logs fetch error:", error);
+      return res.status(500).json({ error: "Audit logs fetch error: " + error.message });
+    }
+
     return res.json({
-      logs: logs.map(l => ({
+      logs: (logs || []).map(l => ({
         id: l.id,
         adminId: l.admin_id,
         adminEmail: l.admin_email,
         action: l.action,
         resourceType: l.resource_type,
         resourceId: l.resource_id,
-        oldValues: l.old_values ? JSON.parse(l.old_values) : null,
-        newValues: l.new_values ? JSON.parse(l.new_values) : null,
+        oldValues: l.old_values ? (typeof l.old_values === 'string' ? JSON.parse(l.old_values) : l.old_values) : null,
+        newValues: l.new_values ? (typeof l.new_values === 'string' ? JSON.parse(l.new_values) : l.new_values) : null,
         ipAddress: l.ip_address,
         timestamp: l.timestamp,
       })),
-      total: total.cnt,
+      total: count || 0,
     });
   } catch (e) {
+    console.error("Audit logs error:", e);
     return res.status(500).json({ error: "Audit logs fetch error: " + e.message });
   }
 });

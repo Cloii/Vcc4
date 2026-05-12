@@ -5,11 +5,27 @@ const unwrap = <T>(data: T | null, error: any): T => {
   return data as T;
 };
 
+// ── Helpers ────────────────────────────────────────────────────────────────────
+// Single source of truth for mapping a raw DB building row to the app shape.
+// Previously duplicated identically in getBuildings() and getBuilding().
+const mapBuilding = (b: any) => ({
+  id: b.id,
+  name: b.name,
+  lat: b.lat,
+  lng: b.lng,
+  description: b.description,
+  category: b.category,
+  sensitivityLevel: b.sensitivity_level,
+  imageUrl: b.image_url ?? null,
+  createdAt: b.created_at,
+  updatedAt: b.updated_at,
+});
+
 // Auth
-export const signup = (data: { email: string; password: string; name: string; role?: string; adminCode?: string }) =>
+export const signup = (_data: { email: string; password: string; name: string; role?: string; adminCode?: string }) =>
   Promise.reject(new Error("Use Supabase Auth (Signup page)"));
 
-export const login = (data: { email: string; password: string }) =>
+export const login = (_data: { email: string; password: string }) =>
   Promise.reject(new Error("Use Supabase Auth (Login page)"));
 
 export const getMyRole = async () => {
@@ -23,62 +39,51 @@ export const getMyRole = async () => {
 // Buildings
 export const getBuildings = async () => {
   const { data, error } = await supabase.from("buildings").select("*").order("name");
-  return unwrap<any[]>(data, error).map((b: any) => ({
-    id: b.id,
-    name: b.name,
-    lat: b.lat,
-    lng: b.lng,
-    description: b.description,
-    category: b.category,
-    sensitivityLevel: b.sensitivity_level,
-    imageUrl: b.image_url,
-    createdAt: b.created_at,
-    updatedAt: b.updated_at,
-  }));
+  return unwrap<any[]>(data, error).map(mapBuilding);
 };
+
 export const getBuilding = async (id: string) => {
   const { data, error } = await supabase.from("buildings").select("*").eq("id", id).single();
-  const b: any = unwrap<any>(data, error);
-  return {
-    id: b.id,
-    name: b.name,
-    lat: b.lat,
-    lng: b.lng,
-    description: b.description,
-    category: b.category,
-    sensitivityLevel: b.sensitivity_level,
-    imageUrl: b.image_url,
-    createdAt: b.created_at,
-    updatedAt: b.updated_at,
-  };
+  return mapBuilding(unwrap<any>(data, error));
 };
+
 export const createBuilding = async (data: any) => {
   const payload = {
     id: data.id,
     name: data.name,
-    lat: data.lat,
-    lng: data.lng,
+    lat: data.lat ?? null,
+    lng: data.lng ?? null,
     description: data.description || "",
     category: data.category || "academic",
     sensitivity_level: data.sensitivityLevel || "public",
     image_url: data.imageUrl || null,
   };
   const { data: out, error } = await supabase.from("buildings").insert(payload).select("*").single();
-  return unwrap(out, error);
+  return mapBuilding(unwrap(out, error));
 };
+
 export const updateBuilding = async (id: string, data: any) => {
-  const payload: any = {
-    name: data.name,
-    lat: data.lat,
-    lng: data.lng,
-    description: data.description,
-    category: data.category,
-    sensitivity_level: data.sensitivityLevel,
-    image_url: data.imageUrl,
-  };
-  const { data: out, error } = await supabase.from("buildings").update(payload).eq("id", id).select("*").single();
-  return unwrap(out, error);
+  // Only include fields that are explicitly provided to avoid overwriting with undefined.
+  // image_url uses data.imageUrl (camelCase) — callers must pass camelCase keys.
+  const payload: Record<string, any> = {};
+  if (data.name        !== undefined) payload.name             = data.name;
+  if (data.lat         !== undefined) payload.lat              = data.lat;
+  if (data.lng         !== undefined) payload.lng              = data.lng;
+  if (data.description !== undefined) payload.description      = data.description;
+  if (data.category    !== undefined) payload.category         = data.category;
+  if (data.sensitivityLevel !== undefined) payload.sensitivity_level = data.sensitivityLevel;
+  // Treat empty string the same as null so Supabase clears the old URL
+  if (data.imageUrl !== undefined) payload.image_url = data.imageUrl || null;
+
+  const { data: out, error } = await supabase
+    .from("buildings")
+    .update(payload)
+    .eq("id", id)
+    .select("*")
+    .single();
+  return mapBuilding(unwrap(out, error));
 };
+
 export const deleteBuilding = async (id: string) => {
   const { error } = await supabase.from("buildings").delete().eq("id", id);
   unwrap(true, error);
@@ -102,6 +107,7 @@ export const getPanoramas = (buildingId?: string) =>
       updatedAt: p.updated_at,
     }));
   })();
+
 export const createPanorama = async (data: any) => {
   const payload = {
     id: data.id,
@@ -114,6 +120,7 @@ export const createPanorama = async (data: any) => {
   const { data: out, error } = await supabase.from("panoramas").insert(payload).select("*").single();
   return unwrap(out, error);
 };
+
 export const updatePanorama = async (id: string, data: any) => {
   const payload: any = {
     building_id: data.buildingId,
@@ -125,11 +132,13 @@ export const updatePanorama = async (id: string, data: any) => {
   const { data: out, error } = await supabase.from("panoramas").update(payload).eq("id", id).select("*").single();
   return unwrap(out, error);
 };
+
 export const deletePanorama = async (id: string) => {
   const { error } = await supabase.from("panoramas").delete().eq("id", id);
   unwrap(true, error);
   return { success: true };
 };
+
 export const reorderPanoramas = async (buildingId: string, orderedIds: string[]) => {
   const updates = orderedIds.map((id, idx) => ({ id, building_id: buildingId, sort_order: idx }));
   const { error } = await supabase.from("panoramas").upsert(updates, { onConflict: "id" });
@@ -152,6 +161,7 @@ export const getPaths = async () => {
     updatedAt: p.updated_at,
   }));
 };
+
 export const createPath = async (data: any) => {
   const { data: out, error } = await supabase
     .from("paths")
@@ -168,6 +178,7 @@ export const createPath = async (data: any) => {
     .single();
   return unwrap(out, error);
 };
+
 export const updatePath = async (id: string, data: any) => {
   const { data: out, error } = await supabase
     .from("paths")
@@ -184,6 +195,7 @@ export const updatePath = async (id: string, data: any) => {
     .single();
   return unwrap(out, error);
 };
+
 export const deletePath = async (id: string) => {
   const { error } = await supabase.from("paths").delete().eq("id", id);
   unwrap(true, error);
@@ -206,6 +218,7 @@ export const getResources = async () => {
     updatedAt: r.updated_at,
   }));
 };
+
 export const createResource = async (data: any) => {
   const { data: out, error } = await supabase
     .from("resources")
@@ -223,6 +236,7 @@ export const createResource = async (data: any) => {
     .single();
   return unwrap(out, error);
 };
+
 export const updateResource = async (id: string, data: any) => {
   const { data: out, error } = await supabase
     .from("resources")
@@ -240,6 +254,7 @@ export const updateResource = async (id: string, data: any) => {
     .single();
   return unwrap(out, error);
 };
+
 export const deleteResource = async (id: string) => {
   const { error } = await supabase.from("resources").delete().eq("id", id);
   unwrap(true, error);
@@ -257,14 +272,18 @@ export const logActivity = async (data: { action: string; userId?: string; build
   });
   if (error) throw new Error(error.message);
 };
+
 export const getActivityLogs = async () => {
-  const { data, error } = await supabase.from("activity_logs").select("*").order("timestamp", { ascending: false }).limit(5000);
+  const { data, error } = await supabase
+    .from("activity_logs")
+    .select("*")
+    .order("timestamp", { ascending: false })
+    .limit(5000);
   return unwrap<any[]>(data, error);
 };
 
 // Audit Logs
 export const getAuditLogs = (params?: { limit?: number; offset?: number; search?: string; resourceType?: string }) => {
-  // Minimal: fetch latest audit logs (RLS admin/staff)
   const limit = params?.limit ?? 200;
   return supabase
     .from("audit_logs")
@@ -279,21 +298,40 @@ export const getAuditLogs = (params?: { limit?: number; offset?: number; search?
 
 // Security Alerts
 export const getSecurityAlerts = async () => {
-  const { data, error } = await supabase.from("security_alerts").select("*").order("timestamp", { ascending: false });
+  const { data, error } = await supabase
+    .from("security_alerts")
+    .select("*")
+    .order("timestamp", { ascending: false });
   return unwrap<any[]>(data, error);
 };
+
 export const createSecurityAlert = async (data: any) => {
-  const { data: out, error } = await supabase.from("security_alerts").insert({ ...data, id: data.id || crypto.randomUUID() }).select("*").single();
+  const { data: out, error } = await supabase
+    .from("security_alerts")
+    .insert({ ...data, id: data.id || crypto.randomUUID() })
+    .select("*")
+    .single();
   return unwrap(out, error);
 };
+
 export const resolveAlert = async (id: string) => {
-  const { error } = await supabase.from("security_alerts").update({ resolved: true, resolved_at: new Date().toISOString() }).eq("id", id);
+  const { error } = await supabase
+    .from("security_alerts")
+    .update({ resolved: true, resolved_at: new Date().toISOString() })
+    .eq("id", id);
   unwrap(true, error);
   return { ok: true };
 };
 
 // Users
-export const getUsers = () => Promise.reject(new Error("User management is now handled by Supabase Auth + profiles"));
+export const getUsers = async () => {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, name, email, role, created_at")
+    .order("created_at", { ascending: false });
+  return unwrap<any[]>(data, error);
+};
+
 export const createUser = () => Promise.reject(new Error("Create users via Supabase Auth"));
 export const updateUserRole = () => Promise.reject(new Error("Update roles via admin tooling (profiles)"));
 export const updateUser = () => Promise.reject(new Error("Update users via Supabase"));
@@ -301,43 +339,72 @@ export const deleteUser = () => Promise.reject(new Error("Delete users via Supab
 
 // Analytics
 export const getAnalytics = async () => {
-  const [{ data: logs, error: lErr }, { data: alerts, error: aErr }, { data: b, error: bErr }, { data: profiles, error: pErr }] =
-    await Promise.all([
-      supabase.from("activity_logs").select("*").order("timestamp", { ascending: false }).limit(5000),
-      supabase.from("security_alerts").select("*").order("timestamp", { ascending: false }),
-      supabase.from("buildings").select("id,name"),
-      supabase.from("profiles").select("role,created_at"),
-    ]);
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+  const [
+    { count: totalLogsCount, error: lCountErr },
+    { data: recentLogs, error: lErr },
+    { data: alerts, error: aErr },
+    { data: buildings, error: bErr },
+    { data: profiles, error: pErr },
+  ] = await Promise.all([
+    supabase.from("activity_logs").select("*", { count: "exact", head: true }),
+    supabase
+      .from("activity_logs")
+      .select("user_id, building_id, action, timestamp")
+      .order("timestamp", { ascending: false })
+      .limit(1000),
+    supabase.from("security_alerts").select("*").order("timestamp", { ascending: false }),
+    supabase.from("buildings").select("id, name"),
+    supabase.from("profiles").select("role, created_at"),
+  ]);
+
+  unwrap(true, lCountErr);
   unwrap(true, lErr);
   unwrap(true, aErr);
   unwrap(true, bErr);
   unwrap(true, pErr);
+
   const logsByDate: Record<string, number> = {};
   const actionCounts: Record<string, number> = {};
   const buildingViews: Record<string, number> = {};
   const uniqueUsers = new Set<string>();
-  for (const log of logs || []) {
+
+  for (const log of recentLogs || []) {
     const date = (log.timestamp || "").split("T")[0] || (log.timestamp || "").split(" ")[0];
     if (date) logsByDate[date] = (logsByDate[date] || 0) + 1;
     if (log.action) actionCounts[log.action] = (actionCounts[log.action] || 0) + 1;
     if (log.building_id) buildingViews[log.building_id] = (buildingViews[log.building_id] || 0) + 1;
     if (log.user_id) uniqueUsers.add(log.user_id);
   }
+
   const dailyActivity = Object.entries(logsByDate)
     .sort(([a], [c]) => a.localeCompare(c))
     .slice(-14)
     .map(([date, count]) => ({ date, count }));
+
   const popularBuildings = Object.entries(buildingViews)
     .sort(([, a], [, c]) => c - a)
     .slice(0, 5)
-    .map(([id, views]) => ({ id, name: (b || []).find((x: any) => x.id === id)?.name || id, views }));
+    .map(([id, views]) => ({
+      id,
+      name: (buildings || []).find((x: any) => x.id === id)?.name || id,
+      views,
+    }));
+
   const roleCounts: Record<string, number> = {};
-  for (const pr of profiles || []) roleCounts[pr.role] = (roleCounts[pr.role] || 0) + 1;
+  let recentSignups = 0;
+  for (const pr of profiles || []) {
+    roleCounts[pr.role] = (roleCounts[pr.role] || 0) + 1;
+    if (pr.created_at && pr.created_at >= sevenDaysAgo) recentSignups++;
+  }
+
   return {
-    totalLogs: (logs || []).length,
+    totalLogs: totalLogsCount ?? 0,
     uniqueUsers: uniqueUsers.size,
     totalAlerts: (alerts || []).length,
     unresolvedAlerts: (alerts || []).filter((x: any) => !x.resolved).length,
+    recentSignups,
     dailyActivity,
     actionCounts,
     popularBuildings,
@@ -361,7 +428,9 @@ export const getRoute = (from: string, to: string, accessible?: boolean) =>
       graph[p.fromBuilding].push({ to: p.toBuilding, distance: p.distance });
       graph[p.toBuilding].push({ to: p.fromBuilding, distance: p.distance });
     }
-    const queue: { node: string; path: string[]; distance: number }[] = [{ node: from, path: [from], distance: 0 }];
+    const queue: { node: string; path: string[]; distance: number }[] = [
+      { node: from, path: [from], distance: 0 },
+    ];
     const visited = new Set<string>();
     while (queue.length) {
       queue.sort((a, b) => a.distance - b.distance);
@@ -373,13 +442,15 @@ export const getRoute = (from: string, to: string, accessible?: boolean) =>
         return { found: true, path: cur.path, distance: cur.distance, walkingTime };
       }
       for (const n of graph[cur.node] || []) {
-        if (!visited.has(n.to)) queue.push({ node: n.to, path: [...cur.path, n.to], distance: cur.distance + n.distance });
+        if (!visited.has(n.to))
+          queue.push({ node: n.to, path: [...cur.path, n.to], distance: cur.distance + n.distance });
       }
     }
     return { found: false, path: [], distance: 0, walkingTime: 0 };
   })();
 
-// File Upload (multipart — not JSON)
+// File Upload
+// uploadImage returns a full Supabase public URL — store it as-is in the DB.
 export const uploadImage = async (file: File): Promise<{ url: string; filename: string }> => {
   const ext = file.name.split(".").pop()?.toLowerCase() || "bin";
   const filename = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
@@ -389,10 +460,9 @@ export const uploadImage = async (file: File): Promise<{ url: string; filename: 
   return { url: data.publicUrl, filename };
 };
 
-// Server URL base (legacy, kept for compat in some components)
 export const SERVER_URL = "";
 
-// Site Content (Landing Page)
+// Site Content
 export type LandingContent = {
   heroBadge: string;
   heroTitle: string;
@@ -416,7 +486,11 @@ export type LandingContent = {
 
 export const getLandingContent = () =>
   (async () => {
-    const { data, error } = await supabase.from("site_content").select("value, updated_at").eq("key", "landing").maybeSingle();
+    const { data, error } = await supabase
+      .from("site_content")
+      .select("value, updated_at")
+      .eq("key", "landing")
+      .maybeSingle();
     unwrap(true, error);
     return { content: (data?.value as any) || null, updatedAt: data?.updated_at || null };
   })();
@@ -424,32 +498,43 @@ export const getLandingContent = () =>
 export const updateLandingContent = (content: LandingContent) =>
   (async () => {
     const payload = { key: "landing", value: content };
-    const { data, error } = await supabase.from("site_content").upsert(payload, { onConflict: "key" }).select("value, updated_at").single();
+    const { data, error } = await supabase
+      .from("site_content")
+      .upsert(payload, { onConflict: "key" })
+      .select("value, updated_at")
+      .single();
     unwrap(true, error);
     return { ok: true, content: data!.value as any, updatedAt: data!.updated_at };
   })();
 
-// Campus Tour settings
-export type CampusTourSettings = {
-  startPanoId: string | null;
-};
+export type CampusTourSettings = { startPanoId: string | null };
 
 export const getCampusTourSettings = () =>
   (async () => {
-    const { data, error } = await supabase.from("site_content").select("value, updated_at").eq("key", "campus_tour").maybeSingle();
+    const { data, error } = await supabase
+      .from("site_content")
+      .select("value, updated_at")
+      .eq("key", "campus_tour")
+      .maybeSingle();
     unwrap(true, error);
-    return { content: (data?.value as any) || { startPanoId: null }, updatedAt: data?.updated_at || null };
+    return {
+      content: (data?.value as any) || { startPanoId: null },
+      updatedAt: data?.updated_at || null,
+    };
   })();
 
 export const updateCampusTourSettings = (content: CampusTourSettings) =>
   (async () => {
     const payload = { key: "campus_tour", value: content };
-    const { data, error } = await supabase.from("site_content").upsert(payload, { onConflict: "key" }).select("value, updated_at").single();
+    const { data, error } = await supabase
+      .from("site_content")
+      .upsert(payload, { onConflict: "key" })
+      .select("value, updated_at")
+      .single();
     unwrap(true, error);
     return { ok: true, content: data!.value as any, updatedAt: data!.updated_at };
   })();
 
-// Panorama-graph routing (guided tour)
 export type TourRouteStep = {
   from: string;
   to: string;
@@ -458,5 +543,5 @@ export type TourRouteStep = {
   toName: string;
 };
 
-export const getTourRoute = (fromPanoId: string, toPanoId: string) =>
+export const getTourRoute = (_fromPanoId: string, _toPanoId: string) =>
   Promise.reject(new Error("Tour route API not migrated yet"));

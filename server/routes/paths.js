@@ -29,7 +29,7 @@ router.get("/", (req, res) => {
 });
 
 // POST /api/paths
-router.post("/", requireAdmin, (req, res) => {
+router.post("/", requireAdmin, async (req, res) => {
   try {
     const { fromBuilding, toBuilding, status, accessible, distance, description } = req.body;
     if (!fromBuilding || !toBuilding) return res.status(400).json({ error: "fromBuilding and toBuilding are required" });
@@ -39,7 +39,7 @@ router.post("/", requireAdmin, (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     ).run(id, fromBuilding, toBuilding, status || "open", accessible ? 1 : 0, distance || 0, description || "");
     const path = db.prepare("SELECT * FROM paths WHERE id = ?").get(id);
-    logAudit(req.user, "CREATE", "path", id, null, req.body);
+    await logAudit(req.user, "CREATE", "path", id, null, req.body);
     return res.status(201).json(mapPath(path));
   } catch (e) {
     return res.status(500).json({ error: "Create path error: " + e.message });
@@ -47,7 +47,7 @@ router.post("/", requireAdmin, (req, res) => {
 });
 
 // PUT /api/paths/:id
-router.put("/:id", requireAdmin, (req, res) => {
+router.put("/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const existing = db.prepare("SELECT * FROM paths WHERE id = ?").get(id);
@@ -65,7 +65,7 @@ router.put("/:id", requireAdmin, (req, res) => {
       id
     );
     const updated = db.prepare("SELECT * FROM paths WHERE id = ?").get(id);
-    logAudit(req.user, "UPDATE", "path", id, existing, req.body);
+    await logAudit(req.user, "UPDATE", "path", id, existing, req.body);
     return res.json(mapPath(updated));
   } catch (e) {
     return res.status(500).json({ error: "Update path error: " + e.message });
@@ -73,13 +73,13 @@ router.put("/:id", requireAdmin, (req, res) => {
 });
 
 // DELETE /api/paths/:id
-router.delete("/:id", requireAdmin, (req, res) => {
+router.delete("/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const existing = db.prepare("SELECT * FROM paths WHERE id = ?").get(id);
     if (!existing) return res.status(404).json({ error: "Path not found" });
     db.prepare("DELETE FROM paths WHERE id = ?").run(id);
-    logAudit(req.user, "DELETE", "path", id, existing, null);
+    await logAudit(req.user, "DELETE", "path", id, existing, null);
     return res.json({ success: true });
   } catch (e) {
     return res.status(500).json({ error: "Delete path error: " + e.message });
