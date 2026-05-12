@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { Link } from "react-router";
 import { motion } from "motion/react";
-import { Camera, BookOpen, Shield, Building2, ArrowRight, Star, Users, Clock } from "lucide-react";
+import { Camera, BookOpen, Shield, Building2, ArrowRight, Star, Users } from "lucide-react";
 import { UBLogo } from "../components/layout/UBLogo";
 import { getLandingContent, SERVER_URL, type LandingContent } from "../lib/api";
 
@@ -11,8 +11,8 @@ const DEFAULT_CONTENT: LandingContent = {
   heroTitleAccent: "Companion",
   heroSubtitle:
     "Explore, navigate, and discover the University of Bohol campus through immersive 360° tours and interactive maps.",
-  heroImageUrl: "https://upload.wikimedia.org/wikipedia/commons/c/c0/University_of_Bohol_inside_look_2.jpg?utm_source=commons.wikimedia.org&utm_campaign=index&utm_content=original",
-  campusImageUrl: "https://upload.wikimedia.org/wikipedia/commons/c/c9/University_of_Bohol_inside_look_1.jpg?utm_source=commons.wikimedia.org&utm_campaign=index&utm_content=original",
+  heroImageUrl: "https://upload.wikimedia.org/wikipedia/commons/c/c0/University_of_Bohol_inside_look_2.jpg",
+  campusImageUrl: "https://upload.wikimedia.org/wikipedia/commons/c/c9/University_of_Bohol_inside_look_1.jpg",
   campusCardTitle: "Main Administration Building",
   campusCardSubtitle: "Click to start tour →",
   campusSectionBadge: "360° Virtual Tours",
@@ -33,7 +33,8 @@ const DEFAULT_CONTENT: LandingContent = {
   ],
 };
 
-const toDisplayUrl = (url: string) => (url?.startsWith("/uploads/") ? `${SERVER_URL}${url}` : url);
+const toDisplayUrl = (url: string) =>
+  url?.startsWith("/uploads/") ? `${SERVER_URL}${url}` : url;
 
 const features = [
   { icon: Camera, title: "360° Virtual Tours", desc: "Explore buildings with immersive panoramic tours and interactive hotspots.", color: "bg-yellow-100 text-yellow-700", link: "/tours" },
@@ -51,43 +52,49 @@ const quickLinks = [
 ];
 
 export default function Landing() {
-  const [scrollY, setScrollY] = useState(0);
   const [content, setContent] = useState<LandingContent>(DEFAULT_CONTENT);
-  useEffect(() => {
-    const onScroll = () => setScrollY(window.scrollY);
-    window.addEventListener("scroll", onScroll);
-    return () => window.removeEventListener("scroll", onScroll);
-  }, []);
 
+  // Stable particle positions — computed once on mount, never on re-render
+  const particles = useMemo(() =>
+    Array.from({ length: 20 }, () => ({
+      left: `${Math.random() * 100}%`,
+      top: `${Math.random() * 100}%`,
+      duration: 3 + Math.random() * 3,
+      delay: Math.random() * 3,
+    })), []);
+
+  // Load hero/campus images and all other content from Supabase via getLandingContent
   useEffect(() => {
     let mounted = true;
     getLandingContent()
-      .then((r) => mounted && r?.content && setContent({ ...DEFAULT_CONTENT, ...r.content }))
+      .then((r) => {
+        if (mounted && r?.content) {
+          setContent({ ...DEFAULT_CONTENT, ...r.content });
+        }
+      })
       .catch(() => void 0);
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, []);
 
   return (
     <div className="overflow-x-hidden">
-      {/* Hero Section */}
+      {/* Hero Section — fixed background, no parallax movement */}
       <section className="relative min-h-screen flex items-center justify-center overflow-hidden">
         <div
-          className="absolute inset-0 bg-cover bg-center"
-          style={{ backgroundImage: `url(${toDisplayUrl(content.heroImageUrl)})`, transform: `translateY(${scrollY * 0.4}px)` }}
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+          style={{ backgroundImage: `url(${toDisplayUrl(content.heroImageUrl)})` }}
         />
         <div className="absolute inset-0 bg-gradient-to-br from-blue-900/90 via-blue-800/80 to-blue-900/90" />
 
-        {/* Animated particles */}
+        {/* Stable animated particles */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          {Array.from({ length: 20 }).map((_, i) => (
+          {particles.map((p, i) => (
             <motion.div
               key={i}
               className="absolute w-1 h-1 bg-yellow-400 rounded-full opacity-60"
-              style={{ left: `${Math.random() * 100}%`, top: `${Math.random() * 100}%` }}
+              style={{ left: p.left, top: p.top }}
               animate={{ y: [-20, 20, -20], opacity: [0.3, 0.8, 0.3] }}
-              transition={{ duration: 3 + Math.random() * 3, repeat: Infinity, delay: Math.random() * 3 }}
+              transition={{ duration: p.duration, repeat: Infinity, delay: p.delay }}
             />
           ))}
         </div>
@@ -109,7 +116,6 @@ export default function Landing() {
             </p>
           </motion.div>
 
-          {/* Quick Links Grid */}
           <motion.div
             initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8, delay: 0.2 }}
             className="flex justify-center gap-3 max-w-2xl mx-auto mb-10 flex-wrap"
@@ -141,17 +147,18 @@ export default function Landing() {
             {content.stats.map(({ label, value }, idx) => {
               const Icon = statIcons[idx] || Building2;
               return (
-              <motion.div
-                key={label}
-                initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.1 }}
-                viewport={{ once: true }}
-                className="text-center text-blue-900"
-              >
-                <Icon size={28} className="mx-auto mb-2" />
-                <div className="text-3xl font-black">{value}</div>
-                <div className="text-sm font-semibold opacity-80">{label}</div>
-              </motion.div>
-            )})}
+                <motion.div
+                  key={label}
+                  initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.1 }}
+                  viewport={{ once: true }}
+                  className="text-center text-blue-900"
+                >
+                  <Icon size={28} className="mx-auto mb-2" />
+                  <div className="text-3xl font-black">{value}</div>
+                  <div className="text-sm font-semibold opacity-80">{label}</div>
+                </motion.div>
+              );
+            })}
           </div>
         </div>
       </section>
@@ -195,19 +202,19 @@ export default function Landing() {
       <section className="py-20 bg-gray-50">
         <div className="max-w-7xl mx-auto px-4">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
-            <motion.div
-              initial={{ opacity: 0, x: -30 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true }}
-            >
-              <div className="inline-block bg-red-100 text-red-700 text-xs font-bold px-4 py-1.5 rounded-full uppercase tracking-wider mb-4">{content.campusSectionBadge}</div>
+            <motion.div initial={{ opacity: 0, x: -30 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true }}>
+              <div className="inline-block bg-red-100 text-red-700 text-xs font-bold px-4 py-1.5 rounded-full uppercase tracking-wider mb-4">
+                {content.campusSectionBadge}
+              </div>
               <h2 className="text-4xl font-black text-blue-900 mb-4">{content.campusSectionTitle}</h2>
-              <p className="text-gray-500 mb-6 leading-relaxed">
-                {content.campusSectionBody}
-              </p>
+              <p className="text-gray-500 mb-6 leading-relaxed">{content.campusSectionBody}</p>
               <div className="space-y-3 mb-8">
                 {["Panoramic 360° photo & video tours", "Interactive navigation hotspots", "Building-by-building exploration", "Works on any device"].map(item => (
                   <div key={item} className="flex items-center gap-3 text-gray-700">
                     <div className="w-5 h-5 bg-green-500 rounded-full flex items-center justify-center flex-shrink-0">
-                      <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                      <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
                     </div>
                     <span className="text-sm font-medium">{item}</span>
                   </div>
@@ -218,12 +225,14 @@ export default function Landing() {
               </Link>
             </motion.div>
 
-            <motion.div
-              initial={{ opacity: 0, x: 30 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true }}
-              className="relative"
-            >
+            <motion.div initial={{ opacity: 0, x: 30 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true }} className="relative">
               <div className="rounded-3xl overflow-hidden shadow-2xl">
-                <img src={toDisplayUrl(content.campusImageUrl)} alt="UB Campus" className="w-full h-80 object-cover" />
+                {/* Campus image loaded from Supabase via content.campusImageUrl */}
+                <img
+                  src={toDisplayUrl(content.campusImageUrl)}
+                  alt="UB Campus"
+                  className="w-full h-80 object-cover"
+                />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent rounded-3xl" />
                 <div className="absolute bottom-4 left-4 right-4 flex items-center gap-3 bg-white/90 backdrop-blur rounded-xl p-3">
                   <div className="w-8 h-8 bg-blue-700 rounded-full flex items-center justify-center">
@@ -234,7 +243,7 @@ export default function Landing() {
                     <p className="text-gray-500 text-xs">{content.campusCardSubtitle}</p>
                   </div>
                   <div className="ml-auto flex">
-                    {[1,2,3,4,5].map(s => <Star key={s} size={12} className="text-yellow-500 fill-yellow-500" />)}
+                    {[1, 2, 3, 4, 5].map(s => <Star key={s} size={12} className="text-yellow-500 fill-yellow-500" />)}
                   </div>
                 </div>
               </div>
