@@ -140,9 +140,15 @@ export const deletePanorama = async (id: string) => {
 };
 
 export const reorderPanoramas = async (buildingId: string, orderedIds: string[]) => {
-  const updates = orderedIds.map((id, idx) => ({ id, building_id: buildingId, sort_order: idx }));
-  const { error } = await supabase.from("panoramas").upsert(updates, { onConflict: "id" });
-  unwrap(true, error);
+  await Promise.all(
+    orderedIds.map((id, idx) =>
+      supabase
+        .from("panoramas")
+        .update({ sort_order: idx })
+        .eq("id", id)
+        .eq("building_id", buildingId)
+    )
+  );
   return getPanoramas(buildingId);
 };
 
