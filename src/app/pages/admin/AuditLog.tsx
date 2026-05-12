@@ -2,7 +2,9 @@ import React, { useEffect, useState, useCallback, useRef } from "react";
 import { motion } from "motion/react";
 import {
   ClipboardList, Search, RefreshCw, Download, Filter,
-  Building2, Users, Map, BookOpen, Image, Upload, Shield, User
+  Building2, Users, Map, BookOpen, Image, Upload, Shield, User,
+  ArrowRight, ImageIcon, Tag, MapPin, FileText, Hash, Globe,
+  AlignLeft, Layers, Link2
 } from "lucide-react";
 import { supabase } from "../../lib/supabaseClient";
 
@@ -19,6 +21,77 @@ const actionColors: Record<string, string> = {
   UPDATE_ROLE: "bg-yellow-100 text-yellow-700",
 };
 
+// Maps field names → human-readable label + icon
+const fieldMeta: Record<string, { label: string; icon: React.FC<any>; isMedia?: boolean }> = {
+  name:        { label: "name",        icon: Tag },
+  title:       { label: "title",       icon: Tag },
+  category:    { label: "category",    icon: Layers },
+  description: { label: "description", icon: AlignLeft },
+  image_url:   { label: "photo",       icon: ImageIcon, isMedia: true },
+  thumbnail:   { label: "thumbnail",   icon: ImageIcon, isMedia: true },
+  lat:         { label: "latitude",    icon: MapPin },
+  lng:         { label: "longitude",   icon: MapPin },
+  floor:       { label: "floor",       icon: Hash },
+  url:         { label: "URL",         icon: Link2 },
+  file_url:    { label: "file",        icon: FileText, isMedia: true },
+  status:      { label: "status",      icon: Globe },
+  role:        { label: "role",        icon: User },
+  order:       { label: "order",       icon: Hash },
+};
+
+function isUrl(val: unknown): boolean {
+  return typeof val === "string" && (val.startsWith("http://") || val.startsWith("https://"));
+}
+
+function friendlyValue(val: unknown, isMedia = false): string {
+  if (val === null || val === undefined || val === "") return "empty";
+  if (isMedia && isUrl(val)) return "image";
+  if (isUrl(val as string)) return `"${(val as string).slice(0, 40)}…"`;
+  if (typeof val === "object") return JSON.stringify(val);
+  return `"${String(val)}"`;
+}
+
+interface ChangeItem {
+  icon: React.FC<any>;
+  label: string;
+  oldVal: unknown;
+  newVal: unknown;
+  isMedia: boolean;
+  key: string;
+}
+
+/**
+ * Diffs old_values vs new_values and returns plain-English change items.
+ */
+function summarizeChanges(
+  action: string,
+  oldValues: Record<string, unknown> | null,
+  newValues: Record<string, unknown> | null
+): ChangeItem[] {
+  if (action === "DELETE" || action === "CREATE" || (!oldValues && !newValues)) return [];
+
+  const old_ = oldValues || {};
+  const new_ = newValues || {};
+
+  // Collect all keys that changed (ignoring `id` and `updated_at`)
+  const skip = new Set(["id", "updated_at", "created_at"]);
+  const keys = Array.from(
+    new Set([...Object.keys(old_), ...Object.keys(new_)])
+  ).filter(k => !skip.has(k) && old_[k] !== new_[k]);
+
+  return keys.map(key => {
+    const meta = fieldMeta[key];
+    return {
+      key,
+      icon: meta?.icon ?? FileText,
+      label: meta?.label ?? key.replace(/_/g, " "),
+      oldVal: old_[key] ?? null,
+      newVal: new_[key] ?? null,
+      isMedia: meta?.isMedia ?? false,
+    };
+  });
+}
+
 const PAGE_SIZE = 25;
 
 export default function AuditLog() {
@@ -31,7 +104,6 @@ export default function AuditLog() {
   const [page, setPage] = useState(0);
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  // ✅ Abort ref and debounce timer for cleanup
   const abortRef = useRef<AbortController | null>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -42,7 +114,6 @@ export default function AuditLog() {
     };
   }, []);
 
-  // ✅ Debounce search — API only fires 400ms after user stops typing
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setSearch(value);
@@ -53,7 +124,6 @@ export default function AuditLog() {
     }, 400);
   };
 
-  // ✅ Load audit logs directly from Supabase with filtering + pagination
   const load = useCallback(async () => {
     abortRef.current?.abort();
     abortRef.current = new AbortController();
@@ -66,12 +136,7 @@ export default function AuditLog() {
         .order("timestamp", { ascending: false })
         .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
 
-      // ✅ Filter by resource_type (snake_case for Supabase)
-      if (resourceType) {
-        query = query.eq("resource_type", resourceType);
-      }
-
-      // ✅ Search across action, admin_email, resource_id
+      if (resourceType) query = query.eq("resource_type", resourceType);
       if (debouncedSearch) {
         query = query.or(
           `action.ilike.%${debouncedSearch}%,admin_email.ilike.%${debouncedSearch}%,resource_id.ilike.%${debouncedSearch}%`
@@ -79,7 +144,6 @@ export default function AuditLog() {
       }
 
       const { data, count, error } = await query;
-
       if (abortRef.current?.signal.aborted) return;
       if (error) throw error;
 
@@ -192,10 +256,11 @@ export default function AuditLog() {
         ) : (
           <div className="divide-y divide-gray-50">
             {logs.map((log, idx) => {
-              // ✅ All fields are snake_case from Supabase
               const ResourceIcon = resourceIcons[log.resource_type] || Shield;
               const actionClass = actionColors[log.action] || "bg-gray-100 text-gray-600";
               const isExpanded = expanded === log.id;
+              const changes = summarizeChanges(log.action, log.old_values, log.new_values);
+              const hasDetail = changes.length > 0 || log.action === "CREATE" || log.action === "DELETE";
 
               return (
                 <motion.div
@@ -203,8 +268,8 @@ export default function AuditLog() {
                   initial={{ opacity: 0, x: -10 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: idx * 0.02 }}
-                  className="hover:bg-gray-50/80 transition-colors cursor-pointer"
-                  onClick={() => setExpanded(isExpanded ? null : log.id)}
+                  className={`transition-colors ${hasDetail ? "cursor-pointer hover:bg-gray-50/80" : ""}`}
+                  onClick={() => hasDetail && setExpanded(isExpanded ? null : log.id)}
                 >
                   <div className="px-5 py-4 flex items-start gap-4">
                     <div className="w-9 h-9 bg-slate-100 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -226,7 +291,16 @@ export default function AuditLog() {
                             {log.resource_id}
                           </span>
                         )}
+
+                        {/* Inline change pills — shown collapsed */}
+                        {!isExpanded && changes.length > 0 && (
+                          <span className="text-xs text-gray-400 italic">
+                            · changed {changes.slice(0, 2).map(c => c.label).join(", ")}
+                            {changes.length > 2 ? ` +${changes.length - 2} more` : ""}
+                          </span>
+                        )}
                       </div>
+
                       <div className="flex items-center gap-3 text-xs text-gray-500">
                         <span className="flex items-center gap-1">
                           <User size={11} /> {log.admin_email || "system"}
@@ -234,38 +308,75 @@ export default function AuditLog() {
                         <span>{new Date(log.timestamp).toLocaleString("en-PH")}</span>
                       </div>
 
-                      {/* Expanded before/after diff */}
-                      {isExpanded && (log.old_values || log.new_values) && (
+                      {/* Expanded: human-readable diff */}
+                      {isExpanded && (
                         <motion.div
                           initial={{ opacity: 0, height: 0 }}
                           animate={{ opacity: 1, height: "auto" }}
-                          className="mt-3 grid sm:grid-cols-2 gap-3"
+                          className="mt-3 space-y-2"
                         >
-                          {log.old_values && (
-                            <div className="bg-red-50 border border-red-100 rounded-xl p-3">
-                              <p className="text-xs font-black text-red-700 mb-1.5">Before</p>
-                              <pre className="text-xs text-red-600 overflow-auto max-h-32 whitespace-pre-wrap break-all">
-                                {JSON.stringify(log.old_values, null, 2)}
-                              </pre>
-                            </div>
+                          {log.action === "CREATE" && (
+                            <p className="text-xs text-green-700 bg-green-50 border border-green-100 rounded-xl px-3 py-2 font-medium">
+                              ✦ New {log.resource_type || "record"} created
+                              {log.new_values?.name ? `: "${log.new_values.name}"` : ""}
+                            </p>
                           )}
-                          {log.new_values && (
-                            <div className="bg-green-50 border border-green-100 rounded-xl p-3">
-                              <p className="text-xs font-black text-green-700 mb-1.5">After</p>
-                              <pre className="text-xs text-green-600 overflow-auto max-h-32 whitespace-pre-wrap break-all">
-                                {JSON.stringify(log.new_values, null, 2)}
-                              </pre>
+
+                          {log.action === "DELETE" && (
+                            <p className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-xl px-3 py-2 font-medium">
+                              ✕ {log.resource_type || "Record"} deleted
+                              {log.old_values?.name ? `: "${log.old_values.name}"` : ""}
+                            </p>
+                          )}
+
+                          {changes.length > 0 && (
+                            <div className="border border-gray-100 rounded-xl overflow-hidden divide-y divide-gray-50">
+                              {changes.map(({ key, icon: Icon, label, oldVal, newVal, isMedia }) => (
+                                <div key={key} className="flex items-center gap-3 px-3 py-2.5 text-xs bg-white">
+                                  <Icon size={13} className="text-gray-400 flex-shrink-0" />
+                                  <span className="text-gray-500 font-semibold capitalize w-24 flex-shrink-0">
+                                    {label}
+                                  </span>
+                                  {/* Old value */}
+                                  {isMedia && isUrl(oldVal) ? (
+                                    <img
+                                      src={oldVal as string}
+                                      alt="before"
+                                      className="w-10 h-10 object-cover rounded-lg border border-red-200 opacity-60 flex-shrink-0"
+                                    />
+                                  ) : (
+                                    <span className="text-red-500 line-through truncate max-w-[120px]">
+                                      {friendlyValue(oldVal, isMedia)}
+                                    </span>
+                                  )}
+                                  <ArrowRight size={11} className="text-gray-300 flex-shrink-0" />
+                                  {/* New value */}
+                                  {isMedia && isUrl(newVal) ? (
+                                    <img
+                                      src={newVal as string}
+                                      alt="after"
+                                      className="w-10 h-10 object-cover rounded-lg border border-green-200 flex-shrink-0"
+                                    />
+                                  ) : (
+                                    <span className="text-green-600 font-medium truncate max-w-[160px]">
+                                      {friendlyValue(newVal, isMedia)}
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
                             </div>
                           )}
                         </motion.div>
                       )}
                     </div>
 
-                    <div className={`text-gray-400 transition-transform ${isExpanded ? "rotate-180" : ""}`}>
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                        <polyline points="6 9 12 15 18 9" />
-                      </svg>
-                    </div>
+                    {hasDetail && (
+                      <div className={`text-gray-400 transition-transform mt-1 ${isExpanded ? "rotate-180" : ""}`}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                          <polyline points="6 9 12 15 18 9" />
+                        </svg>
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               );
