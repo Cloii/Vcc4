@@ -210,9 +210,7 @@ export default function Directory() {
           <div className="bg-gradient-to-br from-blue-700 to-blue-900 rounded-2xl p-4 text-white">
             <h3 className="font-black text-sm mb-3">Quick Navigation</h3>
             <div className="space-y-2">
-              <Link to="/map" className="flex items-center gap-2 text-sm text-blue-200 hover:text-white transition-colors">
-                <MapPin size={14} /> View on Campus Map
-              </Link>
+
               <Link to="/tours" className="flex items-center gap-2 text-sm text-blue-200 hover:text-white transition-colors">
                 <BookOpen size={14} /> Take Virtual Tour
               </Link>

@@ -41,7 +41,7 @@ router.get("/:id", (req, res) => {
 });
 
 // POST /api/buildings
-router.post("/", requireAdmin, (req, res) => {
+router.post("/", requireAdmin, async (req, res) => {
   try {
     const { name, lat, lng, description, category, sensitivityLevel, imageUrl } = req.body;
     if (!name) return res.status(400).json({ error: "Building name is required" });
@@ -52,7 +52,7 @@ router.post("/", requireAdmin, (req, res) => {
     ).run(id, name, lat || 0, lng || 0, description || "", category || "academic", sensitivityLevel || "public", imageUrl || "");
 
     const building = db.prepare("SELECT * FROM buildings WHERE id = ?").get(id);
-    logAudit(req.user, "CREATE", "building", id, null, req.body);
+    await logAudit(req.user, "CREATE", "building", id, null, req.body);
     return res.status(201).json(mapBuilding(building));
   } catch (e) {
     return res.status(500).json({ error: "Create building error: " + e.message });
@@ -60,7 +60,7 @@ router.post("/", requireAdmin, (req, res) => {
 });
 
 // PUT /api/buildings/:id
-router.put("/:id", requireAdmin, (req, res) => {
+router.put("/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const existing = db.prepare("SELECT * FROM buildings WHERE id = ?").get(id);
@@ -82,7 +82,7 @@ router.put("/:id", requireAdmin, (req, res) => {
     );
 
     const updated = db.prepare("SELECT * FROM buildings WHERE id = ?").get(id);
-    logAudit(req.user, "UPDATE", "building", id, existing, req.body);
+    await logAudit(req.user, "UPDATE", "building", id, existing, req.body);
     return res.json(mapBuilding(updated));
   } catch (e) {
     return res.status(500).json({ error: "Update building error: " + e.message });
@@ -90,14 +90,14 @@ router.put("/:id", requireAdmin, (req, res) => {
 });
 
 // DELETE /api/buildings/:id
-router.delete("/:id", requireAdmin, (req, res) => {
+router.delete("/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const existing = db.prepare("SELECT * FROM buildings WHERE id = ?").get(id);
     if (!existing) return res.status(404).json({ error: "Building not found" });
     db.prepare("DELETE FROM buildings WHERE id = ?").run(id);
     db.prepare("DELETE FROM panoramas WHERE building_id = ?").run(id);
-    logAudit(req.user, "DELETE", "building", id, existing, null);
+    await logAudit(req.user, "DELETE", "building", id, existing, null);
     return res.json({ success: true });
   } catch (e) {
     return res.status(500).json({ error: "Delete building error: " + e.message });

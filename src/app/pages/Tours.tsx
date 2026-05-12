@@ -6,7 +6,8 @@ import { getBuildings } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { logActivity } from "../lib/api";
 
-const SERVER_URL = "http://localhost:3001";
+// FIX #1: Use environment variable instead of hardcoded localhost
+const SERVER_URL = import.meta.env.VITE_SERVER_URL || "";
 const resolveImageUrl = (url?: string) => {
   if (!url) return "";
   if (url.startsWith("http")) return url;
@@ -27,10 +28,12 @@ export default function Tours() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("all");
 
+  // FIX #2: Added `user` to dependency array so logActivity fires correctly
+  // when user loads after mount
   useEffect(() => {
     getBuildings().then(setBuildings).catch(() => {}).finally(() => setLoading(false));
     if (user) logActivity({ action: "tours_page_view", userId: user.id }).catch(() => {});
-  }, []);
+  }, [user]);
 
   const filtered = buildings.filter(b => {
     const matchSearch = b.name.toLowerCase().includes(search.toLowerCase()) ||

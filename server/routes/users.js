@@ -29,7 +29,7 @@ router.get("/", requireAdmin, (req, res) => {
 });
 
 // POST /api/users — create user directly (admin only)
-router.post("/", requireSuperAdmin, (req, res) => {
+router.post("/", requireSuperAdmin, async (req, res) => {
   try {
     const { email, password, name, role = "student" } = req.body;
     if (!email || !password || !name) return res.status(400).json({ error: "Email, password, and name are required" });
@@ -44,7 +44,7 @@ router.post("/", requireSuperAdmin, (req, res) => {
     ).run(id, email.toLowerCase(), password_hash, name, role);
 
     const user = db.prepare("SELECT id, email, name, role, created_at, last_login FROM users WHERE id = ?").get(id);
-    logAudit(req.user, "CREATE", "user", id, null, { email, name, role });
+    await logAudit(req.user, "CREATE", "user", id, null, { email, name, role });
     return res.status(201).json(mapUser(user));
   } catch (e) {
     return res.status(500).json({ error: "Create user error: " + e.message });
@@ -52,7 +52,7 @@ router.post("/", requireSuperAdmin, (req, res) => {
 });
 
 // PUT /api/users/:id/role
-router.put("/:id/role", requireAdmin, (req, res) => {
+router.put("/:id/role", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { role } = req.body;
@@ -62,7 +62,7 @@ router.put("/:id/role", requireAdmin, (req, res) => {
     const existing = db.prepare("SELECT * FROM users WHERE id = ?").get(id);
     if (!existing) return res.status(404).json({ error: "User not found" });
     db.prepare("UPDATE users SET role = ? WHERE id = ?").run(role, id);
-    logAudit(req.user, "UPDATE_ROLE", "user", id, { role: existing.role }, { role });
+    await logAudit(req.user, "UPDATE_ROLE", "user", id, { role: existing.role }, { role });
     return res.json({ success: true, role });
   } catch (e) {
     return res.status(500).json({ error: "Role update error: " + e.message });
@@ -70,7 +70,7 @@ router.put("/:id/role", requireAdmin, (req, res) => {
 });
 
 // PUT /api/users/:id — update user details
-router.put("/:id", requireAdmin, (req, res) => {
+router.put("/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { name, email, role, password } = req.body;
@@ -87,7 +87,7 @@ router.put("/:id", requireAdmin, (req, res) => {
     ).run(name ?? existing.name, email ?? existing.email, role ?? existing.role, password_hash, id);
 
     const updated = db.prepare("SELECT id, email, name, role, created_at, last_login FROM users WHERE id = ?").get(id);
-    logAudit(req.user, "UPDATE", "user", id, existing, { name, email, role });
+    await logAudit(req.user, "UPDATE", "user", id, existing, { name, email, role });
     return res.json(mapUser(updated));
   } catch (e) {
     return res.status(500).json({ error: "Update user error: " + e.message });
@@ -95,14 +95,14 @@ router.put("/:id", requireAdmin, (req, res) => {
 });
 
 // DELETE /api/users/:id
-router.delete("/:id", requireSuperAdmin, (req, res) => {
+router.delete("/:id", requireSuperAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     if (id === req.user.id) return res.status(400).json({ error: "Cannot delete your own account" });
     const existing = db.prepare("SELECT * FROM users WHERE id = ?").get(id);
     if (!existing) return res.status(404).json({ error: "User not found" });
     db.prepare("DELETE FROM users WHERE id = ?").run(id);
-    logAudit(req.user, "DELETE", "user", id, existing, null);
+    await logAudit(req.user, "DELETE", "user", id, existing, null);
     return res.json({ success: true });
   } catch (e) {
     return res.status(500).json({ error: "Delete user error: " + e.message });

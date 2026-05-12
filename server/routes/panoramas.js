@@ -37,7 +37,7 @@ router.get("/", (req, res) => {
 
 // PUT /api/panoramas/reorder
 // Body: { buildingId: string, orderedIds: string[] }
-router.put("/reorder", requireAdmin, (req, res) => {
+router.put("/reorder", requireAdmin, async (req, res) => {
   try {
     const { buildingId, orderedIds } = req.body || {};
     if (!buildingId || !Array.isArray(orderedIds) || orderedIds.length === 0) {
@@ -68,7 +68,7 @@ router.put("/reorder", requireAdmin, (req, res) => {
     });
     tx();
 
-    logAudit(req.user, "REORDER", "panorama", buildingId, null, { orderedIds: unique });
+    await logAudit(req.user, "REORDER", "panorama", buildingId, null, { orderedIds: unique });
     const updated = db
       .prepare("SELECT * FROM panoramas WHERE building_id = ? ORDER BY sort_order ASC, name ASC")
       .all(buildingId);
@@ -79,7 +79,7 @@ router.put("/reorder", requireAdmin, (req, res) => {
 });
 
 // POST /api/panoramas
-router.post("/", requireAdmin, (req, res) => {
+router.post("/", requireAdmin, async (req, res) => {
   try {
     const { buildingId, name, imageUrl, hotspots } = req.body;
     if (!buildingId || !name || !imageUrl) return res.status(400).json({ error: "buildingId, name, and imageUrl are required" });
@@ -91,7 +91,7 @@ router.post("/", requireAdmin, (req, res) => {
       `INSERT INTO panoramas (id, building_id, name, image_url, hotspots, sort_order) VALUES (?, ?, ?, ?, ?, ?)`
     ).run(id, buildingId, name, imageUrl, JSON.stringify(hotspots || []), nextOrder);
     const panorama = db.prepare("SELECT * FROM panoramas WHERE id = ?").get(id);
-    logAudit(req.user, "CREATE", "panorama", id, null, req.body);
+    await logAudit(req.user, "CREATE", "panorama", id, null, req.body);
     return res.status(201).json(mapPanorama(panorama));
   } catch (e) {
     return res.status(500).json({ error: "Create panorama error: " + e.message });
@@ -99,7 +99,7 @@ router.post("/", requireAdmin, (req, res) => {
 });
 
 // PUT /api/panoramas/:id
-router.put("/:id", requireAdmin, (req, res) => {
+router.put("/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const existing = db.prepare("SELECT * FROM panoramas WHERE id = ?").get(id);
@@ -116,7 +116,7 @@ router.put("/:id", requireAdmin, (req, res) => {
       id
     );
     const updated = db.prepare("SELECT * FROM panoramas WHERE id = ?").get(id);
-    logAudit(req.user, "UPDATE", "panorama", id, existing, req.body);
+    await logAudit(req.user, "UPDATE", "panorama", id, existing, req.body);
     return res.json(mapPanorama(updated));
   } catch (e) {
     return res.status(500).json({ error: "Update panorama error: " + e.message });
@@ -124,13 +124,13 @@ router.put("/:id", requireAdmin, (req, res) => {
 });
 
 // DELETE /api/panoramas/:id
-router.delete("/:id", requireAdmin, (req, res) => {
+router.delete("/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const existing = db.prepare("SELECT * FROM panoramas WHERE id = ?").get(id);
     if (!existing) return res.status(404).json({ error: "Panorama not found" });
     db.prepare("DELETE FROM panoramas WHERE id = ?").run(id);
-    logAudit(req.user, "DELETE", "panorama", id, existing, null);
+    await logAudit(req.user, "DELETE", "panorama", id, existing, null);
     return res.json({ success: true });
   } catch (e) {
     return res.status(500).json({ error: "Delete panorama error: " + e.message });

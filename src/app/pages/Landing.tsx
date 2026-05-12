@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { motion } from "motion/react";
-import { Map, Camera, BookOpen, Shield, Route, Building2, ArrowRight, Star, Users, Clock } from "lucide-react";
+import { Camera, BookOpen, Shield, Building2, ArrowRight, Star, Users, Clock } from "lucide-react";
 import { UBLogo } from "../components/layout/UBLogo";
 import { getLandingContent, SERVER_URL, type LandingContent } from "../lib/api";
 
@@ -23,8 +23,8 @@ const DEFAULT_CONTENT: LandingContent = {
   ctaBody: "Sign up for free and unlock the full campus experience with your student or staff account.",
   ctaPrimaryLabel: "Get Started Free",
   ctaPrimaryTo: "/signup",
-  ctaSecondaryLabel: "View Campus Map",
-  ctaSecondaryTo: "/map",
+  ctaSecondaryLabel: "View Virtual Tours",
+  ctaSecondaryTo: "/tours",
   stats: [
     { label: "Campus Buildings", value: "10+" },
     { label: "Virtual Tours", value: "10" },
@@ -36,9 +36,7 @@ const DEFAULT_CONTENT: LandingContent = {
 const toDisplayUrl = (url: string) => (url?.startsWith("/uploads/") ? `${SERVER_URL}${url}` : url);
 
 const features = [
-  { icon: Map, title: "Interactive Campus Map", desc: "Navigate the UB campus with our real-time interactive map powered by OpenStreetMap.", color: "bg-blue-100 text-blue-700", link: "/map" },
   { icon: Camera, title: "360° Virtual Tours", desc: "Explore buildings with immersive panoramic tours and interactive hotspots.", color: "bg-yellow-100 text-yellow-700", link: "/tours" },
-  { icon: Route, title: "Smart Routing", desc: "Find the best walking path between buildings, with accessibility-friendly options.", color: "bg-red-100 text-red-700", link: "/map" },
   { icon: BookOpen, title: "Resource Directory", desc: "Search and find campus facilities, offices, and services instantly.", color: "bg-green-100 text-green-700", link: "/directory" },
   { icon: Shield, title: "Secure Access", desc: "Role-based access control with watermark protection and activity monitoring.", color: "bg-purple-100 text-purple-700", link: "/login" },
   { icon: Building2, title: "Building Information", desc: "Detailed info on every building including contacts, hours, and categories.", color: "bg-orange-100 text-orange-700", link: "/directory" },
@@ -47,7 +45,6 @@ const features = [
 const statIcons = [Building2, Camera, BookOpen, Users];
 
 const quickLinks = [
-  { label: "Campus Map", to: "/map", icon: Map, color: "from-blue-600 to-blue-800" },
   { label: "Virtual Tours", to: "/tours", icon: Camera, color: "from-yellow-500 to-yellow-700" },
   { label: "Directory", to: "/directory", icon: BookOpen, color: "from-red-600 to-red-800" },
   { label: "Sign In", to: "/login", icon: Users, color: "from-gray-700 to-gray-900" },
@@ -115,12 +112,12 @@ export default function Landing() {
           {/* Quick Links Grid */}
           <motion.div
             initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.8, delay: 0.2 }}
-            className="grid grid-cols-2 md:grid-cols-4 gap-3 max-w-2xl mx-auto mb-10"
+            className="flex justify-center gap-3 max-w-2xl mx-auto mb-10 flex-wrap"
           >
             {quickLinks.map(({ label, to, icon: Icon, color }) => (
               <Link
                 key={to} to={to}
-                className={`flex flex-col items-center gap-2 bg-gradient-to-br ${color} text-white py-4 px-3 rounded-2xl font-semibold hover:scale-105 transition-transform shadow-lg`}
+                className={`flex flex-col items-center gap-2 bg-gradient-to-br ${color} text-white py-4 px-6 rounded-2xl font-semibold hover:scale-105 transition-transform shadow-lg w-40`}
               >
                 <Icon size={24} />
                 <span className="text-sm">{label}</span>

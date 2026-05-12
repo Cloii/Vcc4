@@ -42,10 +42,16 @@ export default function AdminPaths() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      if (editingId) await updatePath(editingId, form);
-      else await createPath(form);
+      if (editingId) {
+        await updatePath(editingId, form);
+        // ✅ Update local state instead of full refetch
+        setPaths(prev => prev.map(p => p.id === editingId ? { ...p, ...form } : p));
+      } else {
+        const created = await createPath(form);
+        // ✅ Append new path to local state
+        setPaths(prev => [...prev, created]);
+      }
       setShowForm(false); setEditingId(null); setForm(defaultForm);
-      load();
     } catch (e) { console.error(e); }
     finally { setSaving(false); }
   };
@@ -53,12 +59,20 @@ export default function AdminPaths() {
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this path?")) return;
     await deletePath(id);
-    load();
+    // ✅ Remove from local state instead of full refetch
+    setPaths(prev => prev.filter(p => p.id !== id));
   };
 
   const handleStatusChange = async (id: string, status: string) => {
-    await updatePath(id, { status });
-    load();
+    // ✅ Optimistic update — update UI immediately, no full reload
+    setPaths(prev => prev.map(p => p.id === id ? { ...p, status } : p));
+    try {
+      await updatePath(id, { status });
+    } catch (e) {
+      console.error(e);
+      // ✅ Revert on failure by reloading
+      load();
+    }
   };
 
   const filtered = filterStatus === "all" ? paths : paths.filter(p => p.status === filterStatus);

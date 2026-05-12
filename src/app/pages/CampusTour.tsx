@@ -345,7 +345,7 @@ export default function CampusTour() {
               <li>🖱️ <strong>Drag</strong> to look around (Ctrl + scroll to zoom)</li>
               <li>↗️ Click the <strong>yellow arrows</strong> to walk to a connected viewpoint</li>
               <li>🧭 No arrows? Ask an admin to add hotspots in Admin → Panoramas</li>
-              <li>🔎 Use the <Link to="/map" className="text-blue-700 underline">Campus Map</Link> to search a destination and start a guided tour</li>
+
             </ul>
           </motion.div>
         </div>

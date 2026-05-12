@@ -23,8 +23,8 @@ const DEFAULT_LANDING = {
   ctaBody: "Sign up for free and unlock the full campus experience with your student or staff account.",
   ctaPrimaryLabel: "Get Started Free",
   ctaPrimaryTo: "/signup",
-  ctaSecondaryLabel: "View Campus Map",
-  ctaSecondaryTo: "/map",
+  ctaSecondaryLabel: "View Virtual Tours",
+  ctaSecondaryTo: "/tours",
   stats: [
     { label: "Campus Buildings", value: "10+" },
     { label: "Virtual Tours", value: "10" },

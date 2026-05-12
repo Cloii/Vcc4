@@ -2,12 +2,31 @@ import React, { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, PieChart, Pie, Cell, Legend,
+  ResponsiveContainer, PieChart, Pie, Cell,
 } from "recharts";
 import { BarChart3, TrendingUp, Users, Eye, Building2, RefreshCw } from "lucide-react";
 import { getAnalytics } from "../../lib/api";
 
 const COLORS = ["#1D4ED8", "#DC2626", "#F59E0B", "#16A34A", "#9333EA", "#EA580C"];
+
+// FIX: Moved StatCard outside AdminAnalytics so it is defined once at module
+// level instead of being recreated as a brand-new component type on every
+// render. Defining components inside another component causes React to unmount
+// and remount the inner component on every parent re-render (because its
+// identity changes), which wastes DOM work and can cause subtle state bugs.
+const StatCard = ({ icon: Icon, label, value, color }: {
+  icon: any; label: string; value: any; color: string;
+}) => (
+  <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 flex items-center gap-4">
+    <div className={`w-12 h-12 ${color} rounded-xl flex items-center justify-center flex-shrink-0`}>
+      <Icon size={22} className="text-white" />
+    </div>
+    <div>
+      <p className="text-2xl font-black text-gray-800">{value}</p>
+      <p className="text-sm text-gray-500">{label}</p>
+    </div>
+  </div>
+);
 
 export default function AdminAnalytics() {
   const [data, setData] = useState<any>(null);
@@ -34,18 +53,6 @@ export default function AdminAnalytics() {
 
   const dailyData = data?.dailyActivity || [];
   const popularBuildings = data?.popularBuildings || [];
-
-  const StatCard = ({ icon: Icon, label, value, color }: any) => (
-    <div className={`bg-white rounded-2xl p-5 shadow-sm border border-gray-100 flex items-center gap-4`}>
-      <div className={`w-12 h-12 ${color} rounded-xl flex items-center justify-center flex-shrink-0`}>
-        <Icon size={22} className="text-white" />
-      </div>
-      <div>
-        <p className="text-2xl font-black text-gray-800">{value}</p>
-        <p className="text-sm text-gray-500">{label}</p>
-      </div>
-    </div>
-  );
 
   return (
     <div className="space-y-6">
@@ -150,7 +157,7 @@ export default function AdminAnalytics() {
           {actionData.length > 0 ? (
             <ResponsiveContainer width="100%" height={240}>
               <PieChart>
-                <Pie data={actionData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({ name, percent }) => `${name.slice(0,12)}... ${(percent * 100).toFixed(0)}%`}>
+                <Pie data={actionData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({ name, percent }) => `${name.slice(0, 12)}... ${(percent * 100).toFixed(0)}%`}>
                   {actionData.map((_: any, i: number) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
                 </Pie>
                 <Tooltip />

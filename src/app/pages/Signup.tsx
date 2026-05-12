@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { Link, useNavigate } from "react-router";
 import { motion } from "motion/react";
 import { Mail, Lock, Eye, EyeOff, User, AlertCircle, UserPlus, Key } from "lucide-react";
@@ -16,61 +16,73 @@ export default function Signup() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // FIX: Generate particle positions once on mount, not on every re-render.
+  // Previously, Math.random() was called inline in JSX so every keystroke
+  // (which triggers a re-render) would regenerate all 15 positions causing
+  // layout thrash and jank while typing.
+  const particles = useMemo(() =>
+    Array.from({ length: 15 }, () => ({
+      left: `${Math.random() * 100}%`,
+      top: `${Math.random() * 100}%`,
+      duration: 3 + Math.random() * 3,
+      delay: Math.random() * 3,
+    })), []);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setForm(f => ({ ...f, [e.target.name]: e.target.value }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
-  setError("");
-  if (form.password !== form.confirmPassword) return setError("Passwords do not match");
-  if (form.password.length < 6) return setError("Password must be at least 6 characters");
-  setLoading(true);
+    e.preventDefault();
+    setError("");
+    if (form.password !== form.confirmPassword) return setError("Passwords do not match");
+    if (form.password.length < 6) return setError("Password must be at least 6 characters");
+    setLoading(true);
 
-  try {
-    // 1. Sign up the user
-    const { data, error: signUpError } = await supabase.auth.signUp({
-      email: form.email,
-      password: form.password,
-      options: { data: { name: form.name } },
-    });
-    if (signUpError) throw signUpError;
-    if (!data.user) throw new Error("Signup failed");
-
-    // 2. Sign in immediately to get a session
-    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
-      email: form.email,
-      password: form.password,
-    });
-    if (signInError) throw signInError;
-
-    // 3. Assign role via Supabase RPC (works locally + production)
-    if (form.role === "admin" || form.role === "staff") {
-      const { error: rpcError } = await supabase.rpc("assign_role", {
-        requested_role: form.role,
-        code: form.adminCode,
+    try {
+      // 1. Sign up the user
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email: form.email,
+        password: form.password,
+        options: { data: { name: form.name } },
       });
-      if (rpcError) throw new Error("Invalid access code");
-    }
+      if (signUpError) throw signUpError;
+      if (!data.user) throw new Error("Signup failed");
 
-    // 4. Navigate
-    await signIn(form.email, form.password);
-    navigate("/");
-  } catch (err: any) {
-    setError(err.message || "Registration failed");
-  } finally {
-    setLoading(false);
-  }
-};
+      // 2. Sign in immediately to get a session
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+        email: form.email,
+        password: form.password,
+      });
+      if (signInError) throw signInError;
+
+      // 3. Assign role via Supabase RPC (works locally + production)
+      if (form.role === "admin" || form.role === "staff") {
+        const { error: rpcError } = await supabase.rpc("assign_role", {
+          requested_role: form.role,
+          code: form.adminCode,
+        });
+        if (rpcError) throw new Error("Invalid access code");
+      }
+
+      // 4. Navigate
+      await signIn(form.email, form.password);
+      navigate("/");
+    } catch (err: any) {
+      setError(err.message || "Registration failed");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-900 via-blue-800 to-blue-900 flex items-center justify-center p-4 py-8">
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {Array.from({ length: 15 }).map((_, i) => (
+        {particles.map((p, i) => (
           <motion.div key={i} className="absolute w-1 h-1 bg-yellow-400 rounded-full"
-            style={{ left: `${Math.random() * 100}%`, top: `${Math.random() * 100}%` }}
+            style={{ left: p.left, top: p.top }}
             animate={{ y: [-20, 20, -20], opacity: [0.2, 0.6, 0.2] }}
-            transition={{ duration: 3 + Math.random() * 3, repeat: Infinity, delay: Math.random() * 3 }}
+            transition={{ duration: p.duration, repeat: Infinity, delay: p.delay }}
           />
         ))}
       </div>

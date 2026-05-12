@@ -4,7 +4,6 @@ import { useAuth } from "./context/AuthContext";
 import { PublicLayout } from "./components/layout/PublicLayout";
 import { AdminLayout } from "./components/layout/AdminLayout";
 import Landing from "./pages/Landing";
-import MapPage from "./pages/Map";
 import Tours from "./pages/Tours";
 import TourDetail from "./pages/TourDetail";
 import CampusTour from "./pages/CampusTour";
@@ -45,7 +44,6 @@ export const router = createBrowserRouter([
     Component: PublicLayout,
     children: [
       { index: true, Component: Landing },
-      { path: "map", Component: MapPage },
       { path: "tours", Component: Tours },
       { path: "tours/:buildingId", Component: TourDetail },
       { path: "campus-tour", Component: CampusTour },

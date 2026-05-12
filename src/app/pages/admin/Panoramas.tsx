@@ -7,11 +7,17 @@ import {
 import {
   getPanoramas, createPanorama, updatePanorama, deletePanorama, getBuildings, uploadImage,
   getCampusTourSettings, updateCampusTourSettings,
+  // ✅ Import SERVER_URL from the shared api module — never hardcode localhost
+  SERVER_URL,
 } from "../../lib/api";
 import { reorderPanoramas } from "../../lib/api";
 import { HotspotEditor, type EditableHotspot } from "../../components/admin/HotspotEditor";
 
-const SERVER_URL = "http://localhost:3001";
+// ✅ REMOVED: const SERVER_URL = "http://localhost:3001";
+// Using the shared SERVER_URL from ../../lib/api instead.
+// Hardcoding localhost here caused all image requests to hang in production,
+// which stalled browser connections and made every other page slow to load.
+
 const resolveUrl = (url: string) => {
   if (!url) return "";
   if (url.startsWith("http")) return url;
@@ -68,7 +74,8 @@ const PanoUploader: React.FC<{ value: string; onChange: (url: string) => void }>
     setError(""); setUploading(true);
     try {
       const { url } = await uploadImage(file);
-      onChange(`${SERVER_URL}${url}`);
+      // ✅ resolveUrl handles relative paths using the shared SERVER_URL
+      onChange(resolveUrl(url));
     } catch (e: any) { setError(e.message || "Upload failed"); }
     finally { setUploading(false); }
   };
@@ -273,7 +280,6 @@ export default function AdminPanoramas() {
 
     try {
       const updated = await reorderPanoramas(buildingId, next.map((p) => p.id));
-      // server returns updated list for that building
       setPanoramas((all) => {
         const keep = all.filter((p) => p.buildingId !== buildingId);
         return [...keep, ...updated];

@@ -1,11 +1,11 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { motion } from "motion/react";
 import {
   Users, RefreshCw, Shield, GraduationCap, Briefcase, Crown,
   Search, Plus, Trash2, Edit2, X, Save, AlertCircle, Check, KeyRound
 } from "lucide-react";
-import { getUsers, updateUserRole, createUser, deleteUser, updateUser } from "../../lib/api";
 import { useAuth } from "../../context/AuthContext";
+import { supabase } from "../../lib/supabaseClient";
 
 const roleConfig: Record<string, { label: string; color: string; bg: string; icon: any }> = {
   admin: { label: "Admin", color: "text-red-700", bg: "bg-red-100", icon: Crown },
@@ -43,67 +43,172 @@ export default function AdminUsers() {
   const [editingUser, setEditingUser] = useState<any | null>(null);
   const [editForm, setEditForm] = useState({ name: "", email: "", role: "student", password: "" });
 
+  // ✅ Abort ref + toast timer ref for cleanup
+  const abortRef = useRef<AbortController | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    };
+  }, []);
+
   const showToast = (msg: string, type: "success" | "error" = "success") => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
     setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
+    toastTimer.current = setTimeout(() => setToast(null), 3000);
   };
 
-  const load = () => {
+  // ✅ Load users directly from Supabase profiles table
+  const load = async () => {
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
     setLoading(true);
-    getUsers().then(setUsers).catch(console.error).finally(() => setLoading(false));
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (abortRef.current?.signal.aborted) return;
+      if (error) throw error;
+
+      setUsers(data || []);
+    } catch (e: any) {
+      if (e?.name !== "AbortError") console.error("Failed to load users:", e.message);
+    } finally {
+      if (!abortRef.current?.signal.aborted) setLoading(false);
+    }
   };
+
   useEffect(() => { load(); }, []);
 
+  // ✅ Update role directly via Supabase (requires admin update policy in RLS)
   const handleRoleChange = async (userId: string, role: string) => {
     if (userId === currentUser?.id && !confirm("Change your own role? You may lose admin access.")) return;
     setUpdatingId(userId);
     try {
-      await updateUserRole(userId, role);
+      const { error } = await supabase
+        .from("profiles")
+        .update({ role })
+        .eq("id", userId);
+      if (error) throw error;
       setUsers(prev => prev.map(u => u.id === userId ? { ...u, role } : u));
       showToast("Role updated!");
-    } catch (e: any) { showToast(e.message || "Update failed", "error"); }
-    finally { setUpdatingId(null); }
+    } catch (e: any) {
+      showToast(e.message || "Update failed", "error");
+    } finally {
+      setUpdatingId(null);
+    }
   };
 
+  // ✅ Create user via Supabase Auth (uses signUp, then update profile)
   const handleCreate = async () => {
     if (!createForm.name || !createForm.email || !createForm.password) {
       showToast("All fields are required", "error"); return;
     }
     setCreateLoading(true);
     try {
-      await createUser(createForm);
+      // Create the auth user
+      const { data, error } = await supabase.auth.admin.createUser({
+        email: createForm.email,
+        password: createForm.password,
+        user_metadata: { name: createForm.name },
+        email_confirm: true,
+      });
+      if (error) throw error;
+
+      // Update profile with name and role
+      await supabase
+        .from("profiles")
+        .update({ name: createForm.name, role: createForm.role })
+        .eq("id", data.user.id);
+
       showToast("User created successfully!");
       setShowCreate(false);
       setCreateForm({ name: "", email: "", password: "", role: "student" });
       load();
-    } catch (e: any) { showToast(e.message || "Create failed", "error"); }
-    finally { setCreateLoading(false); }
+    } catch (e: any) {
+      // Fallback: if admin API not available, use signUp
+      // Save the current admin session first so we can restore it after signUp
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const adminSession = sessionData?.session;
+
+        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+          email: createForm.email,
+          password: createForm.password,
+          options: { data: { name: createForm.name } },
+        });
+        if (signUpError) throw signUpError;
+
+        if (signUpData.user) {
+          // Update the new user's profile using the new user's session
+          await supabase
+            .from("profiles")
+            .update({ name: createForm.name, role: createForm.role })
+            .eq("id", signUpData.user.id);
+        }
+
+        // Restore the original admin session so the current user stays logged in
+        if (adminSession) {
+          await supabase.auth.setSession({
+            access_token: adminSession.access_token,
+            refresh_token: adminSession.refresh_token,
+          });
+        }
+
+        showToast("User created successfully!");
+        setShowCreate(false);
+        setCreateForm({ name: "", email: "", password: "", role: "student" });
+        load();
+      } catch (fallbackErr: any) {
+        showToast(fallbackErr.message || "Create failed", "error");
+      }
+    } finally {
+      setCreateLoading(false);
+    }
   };
 
+  // ✅ Edit user profile directly via Supabase
   const handleEditSave = async () => {
     if (!editingUser) return;
     setUpdatingId(editingUser.id);
     try {
-      await updateUser(editingUser.id, editForm);
+      const { error } = await supabase
+        .from("profiles")
+        .update({ name: editForm.name, role: editForm.role })
+        .eq("id", editingUser.id);
+      if (error) throw error;
+
       showToast("User updated!");
       setEditingUser(null);
       load();
-    } catch (e: any) { showToast(e.message || "Update failed", "error"); }
-    finally { setUpdatingId(null); }
+    } catch (e: any) {
+      showToast(e.message || "Update failed", "error");
+    } finally {
+      setUpdatingId(null);
+    }
   };
 
+  // ✅ Delete user via Supabase Auth admin API
   const handleDelete = async (userId: string) => {
     if (userId === currentUser?.id) { showToast("Cannot delete your own account", "error"); return; }
     if (!confirm("Permanently delete this user? This cannot be undone.")) return;
     try {
-      await deleteUser(userId);
+      const { error } = await supabase.auth.admin.deleteUser(userId);
+      if (error) throw error;
       showToast("User deleted!");
-      load();
-    } catch (e: any) { showToast(e.message || "Delete failed", "error"); }
+      setUsers(prev => prev.filter(u => u.id !== userId));
+    } catch (e: any) {
+      showToast(e.message || "Delete failed", "error");
+    }
   };
 
   const filtered = users.filter(u => {
-    const matchSearch = u.email?.toLowerCase().includes(search.toLowerCase()) || u.name?.toLowerCase().includes(search.toLowerCase());
+    const matchSearch = u.email?.toLowerCase().includes(search.toLowerCase()) ||
+      u.name?.toLowerCase().includes(search.toLowerCase());
     const matchRole = roleFilter === "all" || u.role === roleFilter;
     return matchSearch && matchRole;
   });
@@ -199,17 +304,6 @@ export default function AdminUsers() {
                 className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none text-sm" />
             </div>
             <div>
-              <label className="text-xs font-semibold text-gray-700 block mb-1">Email</label>
-              <input type="email" value={editForm.email} onChange={e => setEditForm(f => ({ ...f, email: e.target.value }))}
-                className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none text-sm" />
-            </div>
-            <div>
-              <label className="text-xs font-semibold text-gray-700 block mb-1">New Password (leave blank to keep)</label>
-              <input type="password" value={editForm.password} onChange={e => setEditForm(f => ({ ...f, password: e.target.value }))}
-                placeholder="Leave blank to keep current"
-                className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none text-sm" />
-            </div>
-            <div>
               <label className="text-xs font-semibold text-gray-700 block mb-1">Role</label>
               <select value={editForm.role} onChange={e => setEditForm(f => ({ ...f, role: e.target.value }))}
                 className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none text-sm">
@@ -219,6 +313,7 @@ export default function AdminUsers() {
               </select>
             </div>
           </div>
+          <p className="text-xs text-gray-400">Note: Email and password changes require Supabase Dashboard.</p>
           <div className="flex gap-3">
             <button onClick={handleEditSave} disabled={!!updatingId}
               className="flex items-center gap-2 bg-purple-700 hover:bg-purple-800 disabled:opacity-50 text-white font-semibold px-5 py-2.5 rounded-xl text-sm">
@@ -285,7 +380,7 @@ export default function AdminUsers() {
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-3">
                         <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-blue-700 rounded-full flex items-center justify-center text-white font-black text-sm flex-shrink-0">
-                          {u.email?.[0]?.toUpperCase()}
+                          {(u.name || u.email)?.[0]?.toUpperCase()}
                         </div>
                         <div>
                           <p className="font-semibold text-gray-800">{u.name || "—"}</p>
@@ -300,7 +395,7 @@ export default function AdminUsers() {
                       </span>
                     </td>
                     <td className="px-5 py-4 text-gray-500 text-xs">
-                      {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : "—"}
+                      {u.created_at ? new Date(u.created_at).toLocaleDateString() : "—"}
                     </td>
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-2">

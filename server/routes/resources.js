@@ -30,7 +30,7 @@ router.get("/", (req, res) => {
 });
 
 // POST /api/resources
-router.post("/", requireAdmin, (req, res) => {
+router.post("/", requireAdmin, async (req, res) => {
   try {
     const { name, buildingId, location, contactInfo, operatingHours, category, description } = req.body;
     if (!name) return res.status(400).json({ error: "Resource name is required" });
@@ -40,7 +40,7 @@ router.post("/", requireAdmin, (req, res) => {
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(id, name, buildingId || null, location || "", contactInfo || "", operatingHours || "", category || "services", description || "");
     const resource = db.prepare("SELECT * FROM resources WHERE id = ?").get(id);
-    logAudit(req.user, "CREATE", "resource", id, null, req.body);
+    await logAudit(req.user, "CREATE", "resource", id, null, req.body);
     return res.status(201).json(mapResource(resource));
   } catch (e) {
     return res.status(500).json({ error: "Create resource error: " + e.message });
@@ -48,7 +48,7 @@ router.post("/", requireAdmin, (req, res) => {
 });
 
 // PUT /api/resources/:id
-router.put("/:id", requireAdmin, (req, res) => {
+router.put("/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const existing = db.prepare("SELECT * FROM resources WHERE id = ?").get(id);
@@ -67,7 +67,7 @@ router.put("/:id", requireAdmin, (req, res) => {
       id
     );
     const updated = db.prepare("SELECT * FROM resources WHERE id = ?").get(id);
-    logAudit(req.user, "UPDATE", "resource", id, existing, req.body);
+    await logAudit(req.user, "UPDATE", "resource", id, existing, req.body);
     return res.json(mapResource(updated));
   } catch (e) {
     return res.status(500).json({ error: "Update resource error: " + e.message });
@@ -75,13 +75,13 @@ router.put("/:id", requireAdmin, (req, res) => {
 });
 
 // DELETE /api/resources/:id
-router.delete("/:id", requireAdmin, (req, res) => {
+router.delete("/:id", requireAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const existing = db.prepare("SELECT * FROM resources WHERE id = ?").get(id);
     if (!existing) return res.status(404).json({ error: "Resource not found" });
     db.prepare("DELETE FROM resources WHERE id = ?").run(id);
-    logAudit(req.user, "DELETE", "resource", id, existing, null);
+    await logAudit(req.user, "DELETE", "resource", id, existing, null);
     return res.json({ success: true });
   } catch (e) {
     return res.status(500).json({ error: "Delete resource error: " + e.message });

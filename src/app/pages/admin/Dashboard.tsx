@@ -23,43 +23,55 @@ const StatCard = ({ icon: Icon, label, value, color, link }: any) => (
 
 export default function AdminDashboard() {
   const [analytics, setAnalytics] = useState<any>(null);
+  // ✅ Split stats from alerts so main content renders faster
   const [stats, setStats] = useState({ buildings: 0, paths: 0, resources: 0, users: 0, alerts: 0 });
   const [loading, setLoading] = useState(true);
+  const [alertsLoading, setAlertsLoading] = useState(true);
   const [recentAlerts, setRecentAlerts] = useState<any[]>([]);
 
-  // ✅ Use a ref to cancel fetch if user navigates away
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     abortRef.current = new AbortController();
+    const signal = abortRef.current.signal;
 
+    // ✅ Phase 1 — load core stats first (fast render)
     Promise.all([
       getAnalytics(),
       getBuildings(),
       getPaths(),
       getResources(),
       getUsers().catch(() => []),
-      getSecurityAlerts(),
-    ]).then(([analytics, buildings, paths, resources, users, alerts]) => {
-      // ✅ Don't update state if component unmounted
-      if (abortRef.current?.signal.aborted) return;
-
+    ]).then(([analytics, buildings, paths, resources, users]) => {
+      if (signal.aborted) return;
       setAnalytics(analytics);
-      setStats({
+      setStats(s => ({
+        ...s,
         buildings: buildings.length,
         paths: paths.length,
         resources: resources.length,
         users: users.length,
-        alerts: alerts.filter((a: any) => !a.resolved).length,
-      });
-      setRecentAlerts(alerts.slice(0, 5));
+      }));
     }).catch((err) => {
       if (err?.name !== "AbortError") console.error(err);
     }).finally(() => {
-      if (!abortRef.current?.signal.aborted) setLoading(false);
+      if (!signal.aborted) setLoading(false);
     });
 
-    // ✅ Cleanup on unmount
+    // ✅ Phase 2 — load alerts separately so they don't block main content
+    getSecurityAlerts()
+      .then((alerts) => {
+        if (signal.aborted) return;
+        setStats(s => ({ ...s, alerts: alerts.filter((a: any) => !a.resolved).length }));
+        setRecentAlerts(alerts.slice(0, 5));
+      })
+      .catch((err) => {
+        if (err?.name !== "AbortError") console.error(err);
+      })
+      .finally(() => {
+        if (!signal.aborted) setAlertsLoading(false);
+      });
+
     return () => {
       abortRef.current?.abort();
     };
@@ -84,7 +96,6 @@ export default function AdminDashboard() {
               System operational · {new Date().toLocaleDateString("en-PH", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
             </div>
           </div>
-          {/* ✅ Removed localhost:3001 health check — replaced with Supabase status */}
           <div className="hidden sm:flex flex-col items-end gap-2">
             <div className="flex items-center gap-2 text-xs font-semibold px-3 py-1.5 rounded-full bg-green-500/20 text-green-200">
               <CheckCircle2 size={13} />
@@ -145,7 +156,15 @@ export default function AdminDashboard() {
             </h3>
             <Link to="/admin/security" className="text-blue-600 text-xs font-semibold hover:underline">View All</Link>
           </div>
-          {recentAlerts.length === 0 ? (
+
+          {/* ✅ Alerts have their own loading state — don't block the whole page */}
+          {alertsLoading ? (
+            <div className="space-y-2">
+              {[1,2,3].map(i => (
+                <div key={i} className="h-16 bg-gray-100 rounded-xl animate-pulse" />
+              ))}
+            </div>
+          ) : recentAlerts.length === 0 ? (
             <div className="text-center py-8 text-gray-400">
               <Shield size={32} className="mx-auto mb-2 opacity-50" />
               <p className="text-sm">No security alerts</p>

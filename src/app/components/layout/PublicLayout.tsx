@@ -1,16 +1,15 @@
 import React, { useState } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
-import { Map, Camera, BookOpen, LogIn, Menu, X, User, LogOut, Settings, ChevronDown, Compass } from "lucide-react";
+import { Camera, BookOpen, LogIn, Menu, X, User, LogOut, Settings, ChevronDown, Compass } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { UBLogo } from "./UBLogo";
 import { Watermark } from "../security/Watermark";
 import { SecurityMonitor } from "../security/SecurityMonitor";
 
 const navLinks = [
-  { to: "/map", label: "Campus Map", icon: Map },
-  { to: "/campus-tour", label: "Campus Tour", icon: Compass },
   { to: "/tours", label: "Virtual Tours", icon: Camera },
+  { to: "https://campusconnect-ub-app.web.app/", label: "Campus Connect", icon: Compass, external: true },
   { to: "/directory", label: "Directory", icon: BookOpen },
 ];
 
@@ -36,31 +35,44 @@ export const PublicLayout: React.FC = () => {
 
       {/* Navbar */}
       <nav className="bg-blue-800 text-white shadow-lg sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 flex items-center justify-between h-16">
+        <div className="max-w-7xl mx-auto px-4 flex items-center h-16">
           {/* Logo */}
           <Link to="/" className="flex-shrink-0">
             <UBLogo size="md" showText={true} variant="light" />
           </Link>
 
           {/* Desktop Nav Links */}
-          <div className="hidden md:flex items-center gap-1">
-            {navLinks.map(({ to, label, icon: Icon }) => (
-              <Link
-                key={to}
-                to={to}
-                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all font-medium text-sm ${isActive(to)
-                    ? "bg-yellow-500 text-blue-900"
-                    : "text-blue-100 hover:bg-blue-700 hover:text-white"
-                  }`}
-              >
-                <Icon size={16} />
-                {label}
-              </Link>
-            ))}
+          <div className="hidden md:flex flex-1 items-center justify-center gap-1">
+            {navLinks.map(({ to, label, icon: Icon, external }) => 
+              external ? (
+                <a
+                  key={to}
+                  href={to}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg transition-all font-medium text-sm text-blue-100 hover:bg-blue-700 hover:text-white"
+                >
+                  <Icon size={16} />
+                  {label}
+                </a>
+              ) : (
+                <Link
+                  key={to}
+                  to={to}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-all font-medium text-sm ${isActive(to)
+                      ? "bg-yellow-500 text-blue-900"
+                      : "text-blue-100 hover:bg-blue-700 hover:text-white"
+                    }`}
+                >
+                  <Icon size={16} />
+                  {label}
+                </Link>
+              )
+            )}
           </div>
 
           {/* Right Side */}
-          <div className="flex items-center gap-3">
+          <div className="flex-shrink-0 flex items-center gap-3">
             {user ? (
               <div className="relative">
                 <button
@@ -116,16 +128,29 @@ export const PublicLayout: React.FC = () => {
               className="md:hidden bg-blue-900 border-t border-blue-700 overflow-hidden"
             >
               <div className="px-4 py-3 flex flex-col gap-1">
-                {navLinks.map(({ to, label, icon: Icon }) => (
-                  <Link
-                    key={to} to={to}
-                    onClick={() => setMobileOpen(false)}
-                    className={`flex items-center gap-2 px-4 py-3 rounded-lg transition-all font-medium ${isActive(to) ? "bg-yellow-500 text-blue-900" : "text-blue-100 hover:bg-blue-700"
-                      }`}
-                  >
-                    <Icon size={18} /> {label}
-                  </Link>
-                ))}
+                {navLinks.map(({ to, label, icon: Icon, external }) =>
+                  external ? (
+                    <a
+                      key={to}
+                      href={to}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => setMobileOpen(false)}
+                      className="flex items-center gap-2 px-4 py-3 rounded-lg transition-all font-medium text-blue-100 hover:bg-blue-700"
+                    >
+                      <Icon size={18} /> {label}
+                    </a>
+                  ) : (
+                    <Link
+                      key={to} to={to}
+                      onClick={() => setMobileOpen(false)}
+                      className={`flex items-center gap-2 px-4 py-3 rounded-lg transition-all font-medium ${isActive(to) ? "bg-yellow-500 text-blue-900" : "text-blue-100 hover:bg-blue-700"
+                        }`}
+                    >
+                      <Icon size={18} /> {label}
+                    </Link>
+                  )
+                )}
               </div>
             </motion.div>
           )}

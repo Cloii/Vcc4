@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { motion } from "motion/react";
 import { Plus, Edit2, Trash2, BookOpen, Save, X, Phone, Clock, MapPin } from "lucide-react";
 import { getResources, getBuildings, createResource, updateResource, deleteResource } from "../../lib/api";
@@ -15,6 +15,14 @@ const catColors: Record<string, string> = {
   services: "bg-orange-100 text-orange-700",
 };
 
+// ✅ Normalize Supabase snake_case to camelCase
+const normalizeResource = (r: any) => ({
+  ...r,
+  buildingId: r.building_id ?? r.buildingId ?? "",
+  contactInfo: r.contact_info ?? r.contactInfo ?? "",
+  operatingHours: r.operating_hours ?? r.operatingHours ?? "",
+});
+
 export default function AdminResources() {
   const [resources, setResources] = useState<any[]>([]);
   const [buildings, setBuildings] = useState<any[]>([]);
@@ -25,34 +33,81 @@ export default function AdminResources() {
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
 
+  // ✅ Abort ref for cleanup
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
   const load = () => {
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
     setLoading(true);
     Promise.all([getResources(), getBuildings()])
-      .then(([r, b]) => { setResources(r); setBuildings(b); })
-      .catch(console.error).finally(() => setLoading(false));
+      .then(([r, b]) => {
+        if (abortRef.current?.signal.aborted) return;
+        // ✅ Normalize snake_case from Supabase
+        setResources(r.map(normalizeResource));
+        setBuildings(b);
+      })
+      .catch(err => {
+        if (err?.name !== "AbortError") console.error(err);
+      })
+      .finally(() => {
+        if (!abortRef.current?.signal.aborted) setLoading(false);
+      });
   };
+
   useEffect(() => { load(); }, []);
 
   const handleEdit = (r: any) => {
     setEditingId(r.id);
-    setForm({ name: r.name, buildingId: r.buildingId || "", location: r.location, contactInfo: r.contactInfo, operatingHours: r.operatingHours, category: r.category, description: r.description });
+    setForm({
+      name: r.name,
+      buildingId: r.buildingId ?? r.building_id ?? "",
+      location: r.location ?? "",
+      contactInfo: r.contactInfo ?? r.contact_info ?? "",
+      operatingHours: r.operatingHours ?? r.operating_hours ?? "",
+      category: r.category,
+      description: r.description ?? "",
+    });
     setShowForm(true);
   };
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      if (editingId) await updateResource(editingId, form);
-      else await createResource(form);
-      setShowForm(false); setEditingId(null); setForm({ ...defaultForm });
+      // ✅ Send snake_case to match Supabase schema
+      const payload = {
+        ...form,
+        building_id: form.buildingId,
+        contact_info: form.contactInfo,
+        operating_hours: form.operatingHours,
+      };
+      if (editingId) await updateResource(editingId, payload);
+      else await createResource(payload);
+      setShowForm(false);
+      setEditingId(null);
+      setForm({ ...defaultForm });
       load();
-    } catch (e) { console.error(e); } finally { setSaving(false); }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this resource?")) return;
-    await deleteResource(id);
-    load();
+    try {
+      await deleteResource(id);
+      load();
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const filtered = resources.filter(r =>
@@ -69,7 +124,7 @@ export default function AdminResources() {
           <h2 className="text-2xl font-black text-gray-800">Resource Management</h2>
           <p className="text-gray-500 text-sm">Manage campus facilities, offices, and services</p>
         </div>
-        <button onClick={() => { setShowForm(true); setEditingId(null); setForm({...defaultForm}); }}
+        <button onClick={() => { setShowForm(true); setEditingId(null); setForm({ ...defaultForm }); }}
           className="flex items-center gap-2 bg-blue-700 hover:bg-blue-800 text-white font-semibold px-4 py-2.5 rounded-xl transition-all">
           <Plus size={18} /> Add Resource
         </button>
@@ -81,7 +136,9 @@ export default function AdminResources() {
           className="bg-white rounded-2xl border-2 border-blue-200 p-6 shadow-lg">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-black text-gray-800">{editingId ? "Edit Resource" : "Add New Resource"}</h3>
-            <button onClick={() => { setShowForm(false); setEditingId(null); }}><X size={20} className="text-gray-400" /></button>
+            <button onClick={() => { setShowForm(false); setEditingId(null); }}>
+              <X size={20} className="text-gray-400" />
+            </button>
           </div>
           <div className="grid sm:grid-cols-2 gap-4">
             {[
@@ -92,14 +149,14 @@ export default function AdminResources() {
             ].map(({ key, label, placeholder }) => (
               <div key={key}>
                 <label className="text-sm font-semibold text-gray-700 block mb-1">{label}</label>
-                <input value={(form as any)[key]} onChange={e => setForm(f => ({...f, [key]: e.target.value}))}
+                <input value={(form as any)[key]} onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
                   placeholder={placeholder}
                   className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none text-sm" />
               </div>
             ))}
             <div>
               <label className="text-sm font-semibold text-gray-700 block mb-1">Building</label>
-              <select value={form.buildingId} onChange={e => setForm(f => ({...f, buildingId: e.target.value}))}
+              <select value={form.buildingId} onChange={e => setForm(f => ({ ...f, buildingId: e.target.value }))}
                 className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none text-sm">
                 <option value="">Select building...</option>
                 {buildings.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
@@ -107,7 +164,7 @@ export default function AdminResources() {
             </div>
             <div>
               <label className="text-sm font-semibold text-gray-700 block mb-1">Category</label>
-              <select value={form.category} onChange={e => setForm(f => ({...f, category: e.target.value}))}
+              <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
                 className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none text-sm">
                 <option value="admin">Administration</option>
                 <option value="academic">Academic</option>
@@ -117,7 +174,7 @@ export default function AdminResources() {
             </div>
             <div className="sm:col-span-2">
               <label className="text-sm font-semibold text-gray-700 block mb-1">Description</label>
-              <textarea value={form.description} onChange={e => setForm(f => ({...f, description: e.target.value}))}
+              <textarea value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
                 rows={2} placeholder="Brief description..."
                 className="w-full px-3 py-2.5 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none text-sm resize-none" />
             </div>
@@ -128,14 +185,17 @@ export default function AdminResources() {
               {saving ? <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : <Save size={16} />}
               {editingId ? "Update" : "Create"}
             </button>
-            <button onClick={() => { setShowForm(false); setEditingId(null); }} className="px-5 py-2.5 border-2 border-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-50">Cancel</button>
+            <button onClick={() => { setShowForm(false); setEditingId(null); }}
+              className="px-5 py-2.5 border-2 border-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-50">
+              Cancel
+            </button>
           </div>
         </motion.div>
       )}
 
       {/* Search */}
       <input value={search} onChange={e => setSearch(e.target.value)}
-        placeholder="Search resources..." 
+        placeholder="Search resources..."
         className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none"
       />
 
@@ -155,27 +215,43 @@ export default function AdminResources() {
             </thead>
             <tbody>
               {loading ? (
-                Array.from({length:5}).map((_,i) => (
+                Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i} className="border-b border-gray-50">
-                    {Array.from({length:6}).map((_,j) => <td key={j} className="px-4 py-3"><div className="h-4 bg-gray-200 rounded animate-pulse" /></td>)}
+                    {Array.from({ length: 6 }).map((_, j) => (
+                      <td key={j} className="px-4 py-3">
+                        <div className="h-4 bg-gray-200 rounded animate-pulse" />
+                      </td>
+                    ))}
                   </tr>
                 ))
               ) : filtered.map(r => (
                 <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50">
                   <td className="px-4 py-3">
                     <p className="font-semibold text-gray-800">{r.name}</p>
-                    <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5"><MapPin size={10} /> {r.location}</p>
+                    <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                      <MapPin size={10} /> {r.location}
+                    </p>
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full capitalize ${catColors[r.category] || "bg-gray-100 text-gray-600"}`}>{r.category}</span>
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded-full capitalize ${catColors[r.category] || "bg-gray-100 text-gray-600"}`}>
+                      {r.category}
+                    </span>
                   </td>
                   <td className="px-4 py-3 text-gray-600 text-xs">{getBuildingName(r.buildingId)}</td>
-                  <td className="px-4 py-3 text-gray-600 text-xs flex items-center gap-1"><Phone size={10} /> {r.contactInfo}</td>
-                  <td className="px-4 py-3 text-gray-600 text-xs"><Clock size={10} className="inline mr-1" />{r.operatingHours}</td>
+                  <td className="px-4 py-3 text-gray-600 text-xs">
+                    <span className="flex items-center gap-1"><Phone size={10} /> {r.contactInfo}</span>
+                  </td>
+                  <td className="px-4 py-3 text-gray-600 text-xs">
+                    <Clock size={10} className="inline mr-1" />{r.operatingHours}
+                  </td>
                   <td className="px-4 py-3">
                     <div className="flex gap-2">
-                      <button onClick={() => handleEdit(r)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg"><Edit2 size={14} /></button>
-                      <button onClick={() => handleDelete(r.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={14} /></button>
+                      <button onClick={() => handleEdit(r)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg">
+                        <Edit2 size={14} />
+                      </button>
+                      <button onClick={() => handleDelete(r.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg">
+                        <Trash2 size={14} />
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -184,7 +260,10 @@ export default function AdminResources() {
           </table>
         </div>
         {!loading && filtered.length === 0 && (
-          <div className="text-center py-10 text-gray-400"><BookOpen size={32} className="mx-auto mb-2 opacity-50" /><p>No resources found</p></div>
+          <div className="text-center py-10 text-gray-400">
+            <BookOpen size={32} className="mx-auto mb-2 opacity-50" />
+            <p>No resources found</p>
+          </div>
         )}
       </div>
     </div>

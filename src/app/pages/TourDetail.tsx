@@ -7,12 +7,18 @@ import { useAuth } from "../context/AuthContext";
 import { PanoramaViewer } from "../components/tour/PanoramaViewer";
 import { VirtualTourViewer } from "../components/tour/VirtualTourViewer";
 
-const SERVER_URL = "http://localhost:3001";
+// FIX #1: Use environment variable instead of hardcoded localhost
+const SERVER_URL = import.meta.env.VITE_SERVER_URL || "";
 const resolveImageUrl = (url?: string) => {
   if (!url) return "";
   if (url.startsWith("http")) return url;
   return `${SERVER_URL}${url}`;
 };
+
+// FIX #2: Module-level cache so it persists across navigations and is never
+// re-fetched after the first successful load, no matter how many times the
+// user visits a tour page.
+let globalPanosCache: any[] | null = null;
 
 export default function TourDetail() {
   const { buildingId } = useParams<{ buildingId: string }>();
@@ -26,7 +32,6 @@ export default function TourDetail() {
   const [currentPano, setCurrentPano] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [restricted, setRestricted] = useState(false);
-  const [allPanosCache, setAllPanosCache] = useState<any[] | null>(null);
 
   const buildingPanoIds = useMemo(() => new Set(panoramas.map((p) => p.id)), [panoramas]);
 
@@ -56,10 +61,13 @@ export default function TourDetail() {
     }).finally(() => setLoading(false));
   }, [buildingId, role, requestedPanoId]);
 
+  // FIX #2 (continued): Use the module-level cache instead of component state.
+  // This means a global panorama fetch is only ever made once per browser session,
+  // not once per tour page visit.
   const ensureAllPanos = async () => {
-    if (allPanosCache) return allPanosCache;
+    if (globalPanosCache) return globalPanosCache;
     const all = await getPanoramas().catch(() => []);
-    setAllPanosCache(all);
+    globalPanosCache = all;
     return all;
   };
 

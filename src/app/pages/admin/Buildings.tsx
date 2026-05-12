@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { motion } from "motion/react";
 import {
   Plus, Edit2, Trash2, Building2, Save, X, Lock,
   Upload, Image, ExternalLink, Check, AlertCircle
 } from "lucide-react";
-import { getBuildings, createBuilding, updateBuilding, deleteBuilding, uploadImage, SERVER_URL } from "../../lib/api";
+import { getBuildings, createBuilding, updateBuilding, deleteBuilding, uploadImage } from "../../lib/api";
+
+const SERVER_URL = import.meta.env.VITE_SERVER_URL || "";
 
 const defaultForm = {
   name: "", lat: 9.6546, lng: 123.8547, description: "",
@@ -132,6 +134,13 @@ const catColor: Record<string, string> = {
   services: "bg-orange-100 text-orange-700",
 };
 
+// ✅ Normalize Supabase snake_case to camelCase
+const normalizeBuilding = (b: any) => ({
+  ...b,
+  sensitivityLevel: b.sensitivity_level ?? b.sensitivityLevel ?? "public",
+  imageUrl: b.image_url ?? b.imageUrl ?? "",
+});
+
 export default function AdminBuildings() {
   const [buildings, setBuildings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -142,20 +151,55 @@ export default function AdminBuildings() {
   const [search, setSearch] = useState("");
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // ✅ Abort ref for fetch cleanup
+  const abortRef = useRef<AbortController | null>(null);
+
+  // ✅ Cleanup both timer and fetch on unmount
+  useEffect(() => {
+    return () => {
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      abortRef.current?.abort();
+    };
+  }, []);
+
   const showToast = (msg: string, type: "success" | "error" = "success") => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
     setToast({ msg, type });
-    setTimeout(() => setToast(null), 3000);
+    toastTimer.current = setTimeout(() => setToast(null), 3000);
   };
 
   const load = () => {
+    abortRef.current?.abort();
+    abortRef.current = new AbortController();
     setLoading(true);
-    getBuildings().then(setBuildings).catch(console.error).finally(() => setLoading(false));
+    getBuildings()
+      .then(data => {
+        if (abortRef.current?.signal.aborted) return;
+        // ✅ Normalize snake_case fields from Supabase
+        setBuildings(data.map(normalizeBuilding));
+      })
+      .catch(err => {
+        if (err?.name !== "AbortError") console.error(err);
+      })
+      .finally(() => {
+        if (!abortRef.current?.signal.aborted) setLoading(false);
+      });
   };
+
   useEffect(() => { load(); }, []);
 
   const handleEdit = (b: any) => {
     setEditingId(b.id);
-    setForm({ name: b.name, lat: b.lat, lng: b.lng, description: b.description, category: b.category, sensitivityLevel: b.sensitivityLevel, imageUrl: b.imageUrl || "" });
+    setForm({
+      name: b.name,
+      lat: b.lat,
+      lng: b.lng,
+      description: b.description,
+      category: b.category,
+      sensitivityLevel: b.sensitivityLevel ?? b.sensitivity_level ?? "public",
+      imageUrl: b.imageUrl ?? b.image_url ?? "",
+    });
     setShowForm(true);
     window.scrollTo(0, 0);
   };
@@ -164,14 +208,24 @@ export default function AdminBuildings() {
     if (!form.name.trim()) return;
     setSaving(true);
     try {
-      if (editingId) await updateBuilding(editingId, form);
-      else await createBuilding(form);
-      setShowForm(false); setEditingId(null); setForm({ ...defaultForm });
+      // ✅ Send snake_case to match Supabase schema
+      const payload = {
+        ...form,
+        sensitivity_level: form.sensitivityLevel,
+        image_url: form.imageUrl,
+      };
+      if (editingId) await updateBuilding(editingId, payload);
+      else await createBuilding(payload);
+      setShowForm(false);
+      setEditingId(null);
+      setForm({ ...defaultForm });
       showToast(editingId ? "Building updated!" : "Building created!");
       load();
     } catch (e: any) {
       showToast(e.message || "Save failed", "error");
-    } finally { setSaving(false); }
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -180,7 +234,9 @@ export default function AdminBuildings() {
       await deleteBuilding(id);
       showToast("Building deleted!");
       load();
-    } catch (e: any) { showToast(e.message || "Delete failed", "error"); }
+    } catch (e: any) {
+      showToast(e.message || "Delete failed", "error");
+    }
   };
 
   const filtered = buildings.filter(b =>
@@ -312,8 +368,10 @@ export default function AdminBuildings() {
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-md transition-shadow">
                 {b.imageUrl ? (
                   <div className="h-36 overflow-hidden relative">
-                    <img src={b.imageUrl?.startsWith("http") ? b.imageUrl : `${SERVER_URL}${b.imageUrl}`}
-                      alt={b.name} className="w-full h-full object-cover" />
+                    <img
+                      src={b.imageUrl?.startsWith("http") ? b.imageUrl : `${SERVER_URL}${b.imageUrl}`}
+                      alt={b.name} className="w-full h-full object-cover"
+                    />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
                   </div>
                 ) : (
