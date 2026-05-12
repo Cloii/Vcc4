@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { Link } from "react-router";
 import { motion } from "motion/react";
 import { Camera, BookOpen, Shield, Building2, ArrowRight, Star, Users, Clock } from "lucide-react";
@@ -11,8 +11,8 @@ const DEFAULT_CONTENT: LandingContent = {
   heroTitleAccent: "Companion",
   heroSubtitle:
     "Explore, navigate, and discover the University of Bohol campus through immersive 360° tours and interactive maps.",
-  heroImageUrl: "https://images.unsplash.com/photo-1572162452011-08150287fc3a?w=1600&q=80",
-  campusImageUrl: "https://images.unsplash.com/photo-1769589634324-cac82da5ac3a?w=800&q=80",
+  heroImageUrl: "https://upload.wikimedia.org/wikipedia/commons/c/c0/University_of_Bohol_inside_look_2.jpg?utm_source=commons.wikimedia.org&utm_campaign=index&utm_content=original",
+  campusImageUrl: "https://upload.wikimedia.org/wikipedia/commons/c/c9/University_of_Bohol_inside_look_1.jpg?utm_source=commons.wikimedia.org&utm_campaign=index&utm_content=original",
   campusCardTitle: "Main Administration Building",
   campusCardSubtitle: "Click to start tour →",
   campusSectionBadge: "360° Virtual Tours",
