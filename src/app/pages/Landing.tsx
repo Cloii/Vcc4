@@ -28,7 +28,7 @@ const DEFAULT_CONTENT: LandingContent = {
   ctaSecondaryTo: "/tours",
   stats: [
     { label: "Campus Buildings", value: "10+" },
-    { label: "Virtual Tours", value: "10" },
+    { label: "Virtual Tours", value: "10+" },
     { label: "Campus Resources", value: "50+" },
     { label: "Active Students", value: "5000+" },
   ],

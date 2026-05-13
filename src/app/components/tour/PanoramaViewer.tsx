@@ -18,8 +18,6 @@ interface Hotspot {
   y: number;
   label: string;
   targetPanoId: string;
-  // Optional real 360 coordinates (preferred).
-  // yawDeg: 0..360 (0 = forward), pitchDeg: -90..90 (up/down)
   yawDeg?: number;
   pitchDeg?: number;
 }
@@ -31,7 +29,8 @@ interface PanoramaViewerProps {
   onHotspotClick?: (targetPanoId: string) => void;
 }
 
-const SERVER_URL = "http://localhost:3001";
+// FIX: Use env var instead of hardcoded localhost
+const SERVER_URL = import.meta.env.VITE_SERVER_URL || "";
 const resolveUrl = (url: string) => {
   if (!url) return "";
   if (url.startsWith("http")) return url;
@@ -45,8 +44,11 @@ export const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
   const viewerRef = useRef<Viewer | null>(null);
   const markersRef = useRef<MarkersPlugin | null>(null);
   const panoramaLoadGenRef = useRef(0);
+  // Keep a stable ref to onHotspotClick so the init effect doesn't re-run when it changes
+  const onHotspotClickRef = useRef(onHotspotClick);
+  useEffect(() => { onHotspotClickRef.current = onHotspotClick; }, [onHotspotClick]);
 
-  const [zoom, setZoom] = useState(50); // PSV zoom level (approx 0..100)
+  const [zoom, setZoom] = useState(50);
   const shellRef = useRef<HTMLDivElement>(null);
   const [immersive, setImmersive] = useState(false);
   const [showHint, setShowHint] = useState(true);
@@ -55,6 +57,7 @@ export const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
 
   const resolvedUrl = useMemo(() => resolveUrl(imageUrl), [imageUrl]);
 
+  // Reset UI state when panorama URL changes
   useEffect(() => {
     setZoom(50);
     setLoaded(false);
@@ -77,43 +80,46 @@ export const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
     }
   }
 
-  // Init viewer once
+  // FIX: Init viewer WITH the first panorama immediately so there's no gap.
+  // Previously: viewer created with no panorama → second useEffect loads it → race condition.
+  // Now: viewer created with panorama → loads immediately on mount.
   useEffect(() => {
     if (!viewerContainerRef.current) return;
     if (viewerRef.current) return;
+    if (!resolvedUrl) return;
 
     const viewer = new Viewer({
       container: viewerContainerRef.current,
+      // Pass panorama on init so it starts loading immediately
+      panorama: resolvedUrl,
       navbar: false,
       mousewheel: true,
       touchmoveTwoFingers: false,
       loadingTxt: "Loading 360° panorama…",
       plugins: [
-        MarkersPlugin.withConfig({
-          markers: [],
-        }),
+        MarkersPlugin.withConfig({ markers: [] }),
       ],
     });
 
     viewerRef.current = viewer;
     markersRef.current = viewer.getPlugin(MarkersPlugin) as unknown as MarkersPlugin;
 
-    const onReady = () => setLoaded(true);
+    const onReady = () => {
+      setLoaded(true);
+      setImgError(false);
+    };
     const onPanoramaError = () => {
       setLoaded(true);
       setImgError(true);
     };
 
-    // core events
     viewer.addEventListener("ready", onReady);
     viewer.addEventListener("panorama-error", onPanoramaError as any);
 
-    // marker click -> navigate
     const markers = markersRef.current;
     const onSelectMarker = (e: any) => {
-      const marker = e?.marker;
-      const targetPanoId = marker?.config?.data?.targetPanoId;
-      if (targetPanoId) onHotspotClick?.(targetPanoId);
+      const targetPanoId = e?.marker?.config?.data?.targetPanoId;
+      if (targetPanoId) onHotspotClickRef.current?.(targetPanoId);
     };
     markers?.addEventListener("select-marker", onSelectMarker as any);
 
@@ -131,9 +137,10 @@ export const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
         markersRef.current = null;
       }
     };
-  }, [onHotspotClick]); // IMPORTANT: do not recreate viewer when URL changes
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only runs once — panorama changes handled by the effect below
 
-  // Load panorama when image changes
+  // Load panorama when image URL changes (after initial mount)
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer) return;
@@ -144,21 +151,21 @@ export const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
       return;
     }
 
+    // Skip if this is the initial load (viewer was created with this URL already)
+    const gen = ++panoramaLoadGenRef.current;
+    if (gen === 1) return; // First load handled by viewer constructor above
+
     setLoaded(false);
     setImgError(false);
 
-    const gen = ++panoramaLoadGenRef.current;
-
     void (async () => {
       try {
-        await withTimeout(viewer.setPanorama(resolvedUrl), 60000, "Panorama load");
+        await withTimeout(viewer.setPanorama(resolvedUrl), 60_000, "Panorama load");
         if (gen !== panoramaLoadGenRef.current) return;
         setLoaded(true);
         setImgError(false);
       } catch {
         if (gen !== panoramaLoadGenRef.current) return;
-        // If PSV aborted/choked, still allow ready-state recovery via `ready` event above.
-        // This timeout mainly prevents infinite spinners on bad URLs/hangs.
         setLoaded(true);
         setImgError(true);
       }
@@ -169,18 +176,15 @@ export const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
     };
   }, [resolvedUrl]);
 
-  // Hotspots -> markers
+  // Hotspots → markers
   useEffect(() => {
     const markers = markersRef.current;
     if (!markers) return;
 
-    // Backward-compatible conversion:
-    // - old x: 0..100 across panorama => yaw 0..360deg
-    // - old y: 0..100 top..bottom => pitch +30..-30deg (keeps markers near horizon by default)
     const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
     const markersList = hotspots.map((hs, i) => {
       const yawDeg = hs.yawDeg ?? ((hs.x ?? 0) / 100) * 360;
-      const pitchDeg = hs.pitchDeg ?? (30 - clamp(hs.y ?? 50, 0, 100) * 0.6); // 0->30, 100->-30
+      const pitchDeg = hs.pitchDeg ?? (30 - clamp(hs.y ?? 50, 0, 100) * 0.6);
 
       return {
         id: `hs-${i}`,
@@ -210,7 +214,6 @@ export const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
     try {
       (markers as any).setMarkers(markersList);
     } catch {
-      // fallback for older plugin API
       (markers as any).clearMarkers?.();
       markersList.forEach((m) => (markers as any).addMarker?.(m));
     }
@@ -283,7 +286,7 @@ export const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
       ref={shellRef}
       className={`relative h-full overflow-hidden bg-black select-none ${immersive ? "" : "rounded-2xl"}`}
     >
-      {/* ── Panorama image ─────────────────────────────────────────────────── */}
+      {/* ── Panorama container ─────────────────────────────────────────────── */}
       <div
         ref={viewerContainerRef}
         className="absolute inset-0"
