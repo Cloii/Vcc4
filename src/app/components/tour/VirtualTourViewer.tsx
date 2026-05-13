@@ -394,15 +394,15 @@ export const VirtualTourViewer: React.FC<VirtualTourViewerProps> = ({
         onClick={handleFullscreenToggle}
         aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
         className="
-          absolute top-2 right-2 z-[9999]
-          bg-black/60 backdrop-blur-sm text-white
-          p-2.5 rounded-xl shadow-lg
-          hover:bg-black/80 active:scale-95
+          absolute top-3 right-3 z-[9999]
+          bg-black/70 backdrop-blur-sm text-white
+          p-1.5 rounded-lg shadow-lg
+          hover:bg-black/90 active:scale-95
           transition-all duration-150
           touch-manipulation
         "
       >
-        {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+        {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
       </button>
     </div>
   );

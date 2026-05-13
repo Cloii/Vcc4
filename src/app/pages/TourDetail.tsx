@@ -274,10 +274,6 @@ useEffect(() => {
               </div>
             </div>
             <p className="text-gray-500 text-sm leading-relaxed">{building.description}</p>
-            <div className="mt-4 flex items-center gap-2 text-sm text-gray-500">
-              <MapPin size={14} className="text-red-500" />
-              <span>{building.lat?.toFixed(4)}°N, {building.lng?.toFixed(4)}°E</span>
-            </div>
           </motion.div>
 
           {/* Navigation Guide */}
