@@ -4,6 +4,7 @@ import { motion } from "motion/react";
 import { Camera, BookOpen, Shield, Building2, ArrowRight, Star, Users } from "lucide-react";
 import { UBLogo } from "../components/layout/UBLogo";
 import { getLandingContent, SERVER_URL, type LandingContent } from "../lib/api";
+import { preloadAllPanoramas } from "../lib/panoramaPreloader"; // ← ADD THIS
 
 const DEFAULT_CONTENT: LandingContent = {
   heroBadge: "University of Bohol",
@@ -63,7 +64,8 @@ export default function Landing() {
       delay: Math.random() * 3,
     })), []);
 
-  // Load hero/campus images and all other content from Supabase via getLandingContent
+  // Load hero/campus images and all other content from Supabase via getLandingContent.
+  // After content loads, silently preload all panorama images in the background.
   useEffect(() => {
     let mounted = true;
     getLandingContent()
@@ -72,7 +74,14 @@ export default function Landing() {
           setContent({ ...DEFAULT_CONTENT, ...r.content });
         }
       })
-      .catch(() => void 0);
+      .catch(() => void 0)
+      .finally(() => {
+        // ↓ Fire-and-forget: starts downloading all panoramas silently.
+        // Uses a 2s delay so it doesn't compete with hero image loading.
+        if (mounted) {
+          setTimeout(() => preloadAllPanoramas(), 2000);
+        }
+      });
     return () => { mounted = false; };
   }, []);
 
@@ -227,7 +236,6 @@ export default function Landing() {
 
             <motion.div initial={{ opacity: 0, x: 30 }} whileInView={{ opacity: 1, x: 0 }} viewport={{ once: true }} className="relative">
               <div className="rounded-3xl overflow-hidden shadow-2xl">
-                {/* Campus image loaded from Supabase via content.campusImageUrl */}
                 <img
                   src={toDisplayUrl(content.campusImageUrl)}
                   alt="UB Campus"

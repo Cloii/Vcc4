@@ -5,6 +5,7 @@ import { Camera, Search, Filter, Building2, ChevronRight, PlayCircle } from "luc
 import { getBuildings } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import { logActivity } from "../lib/api";
+import { preloadBuildingPanoramas } from "../lib/panoramaPreloader"; // ← ADD THIS
 
 // FIX #1: Use environment variable instead of hardcoded localhost
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || "";
@@ -102,8 +103,13 @@ export default function Tours() {
                 key={b.id}
                 initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.07 }}
               >
-                <Link to={`/tours/${b.id}`}
+                <Link
+                  to={`/tours/${b.id}`}
                   className="block bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-xl hover:-translate-y-1 transition-all group"
+                  // ↓ Preload this building's panoramas when the user hovers the card
+                  onMouseEnter={() => preloadBuildingPanoramas(b.id)}
+                  // ↓ Also works on mobile (touch = intent to navigate)
+                  onTouchStart={() => preloadBuildingPanoramas(b.id)}
                   onClick={() => user && logActivity({ action: "tour_start", userId: user.id, buildingId: b.id }).catch(() => {})}
                 >
                   {/* Image */}

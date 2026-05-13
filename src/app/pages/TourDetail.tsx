@@ -61,6 +61,17 @@ export default function TourDetail() {
     }).finally(() => setLoading(false));
   }, [buildingId, role, requestedPanoId]);
 
+
+
+  // Prefetch all other panorama images in the background after current one loads
+useEffect(() => {
+  if (panoramas.length <= 1) return;
+  panoramas.forEach((pano) => {
+    if (pano.id === currentPano?.id) return; // skip current, already loading
+    const img = new Image();
+    img.src = resolveImageUrl(pano.imageUrl);
+  });
+}, [panoramas, currentPano?.id]);
   // FIX #2 (continued): Use the module-level cache instead of component state.
   // This means a global panorama fetch is only ever made once per browser session,
   // not once per tour page visit.
@@ -226,8 +237,10 @@ export default function TourDetail() {
               <p className="text-sm font-bold text-gray-600 mb-2">📍 Viewpoints</p>
               <div className="flex gap-2 overflow-x-auto pb-2">
                 {panoramas.map(pano => (
-                  <button key={pano.id} onClick={() => setCurrentPano(pano)}
-                    className={`flex-shrink-0 relative rounded-xl overflow-hidden border-2 transition-all ${
+                      <button key={pano.id} onClick={() => {
+                        if (pano.id !== currentPano?.id) setCurrentPano(pano);
+                      }}      
+                     className={`flex-shrink-0 relative rounded-xl overflow-hidden border-2 transition-all ${
                       currentPano?.id === pano.id ? "border-blue-600 ring-2 ring-blue-300" : "border-gray-200 hover:border-blue-300"
                     }`}
                     style={{ width: 100, height: 68 }}
@@ -309,7 +322,9 @@ export default function TourDetail() {
               <p className="font-bold text-gray-700 text-sm mb-3">All Viewpoints ({panoramas.length})</p>
               <div className="space-y-1.5">
                 {panoramas.map(pano => (
-                  <button key={pano.id} onClick={() => setCurrentPano(pano)}
+                <button key={pano.id} onClick={() => {
+                  if (pano.id !== currentPano?.id) setCurrentPano(pano);
+                }}
                     className={`w-full text-left flex items-center gap-2 px-3 py-2 rounded-xl text-sm transition-colors ${
                       currentPano?.id === pano.id ? "bg-blue-100 text-blue-700 font-semibold" : "hover:bg-gray-50 text-gray-600"
                     }`}
