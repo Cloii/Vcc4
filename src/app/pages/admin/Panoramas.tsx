@@ -157,8 +157,6 @@ export default function AdminPanoramas() {
   const [filterBuilding, setFilterBuilding] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
-  const [startPanoId, setStartPanoId] = useState<string>("");
-  const [savingStart, setSavingStart] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showToast = useCallback((msg: string, type: "success" | "error" = "success") => {
@@ -172,12 +170,10 @@ export default function AdminPanoramas() {
     Promise.all([
       getPanoramas(),
       getBuildings(),
-      getCampusTourSettings().catch(() => ({ content: { startPanoId: null }, updatedAt: null })),
     ])
-      .then(([p, b, s]) => {
+      .then(([p, b]) => {
         setPanoramas(p);
         setBuildings(b);
-        setStartPanoId(s?.content?.startPanoId || "");
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -226,18 +222,7 @@ export default function AdminPanoramas() {
     return map;
   }, [panoramas, filterBuilding]);
 
-  const handleSaveStart = useCallback(async (newId: string) => {
-    setSavingStart(true);
-    try {
-      await updateCampusTourSettings({ startPanoId: newId || null });
-      setStartPanoId(newId);
-      showToast("Campus tour start updated!");
-    } catch (e: any) {
-      showToast(e?.message || "Failed to update start", "error");
-    } finally {
-      setSavingStart(false);
-    }
-  }, [showToast]);
+
 
   const handleEdit = useCallback((p: any) => {
     setEditingId(p.id);
@@ -376,34 +361,7 @@ export default function AdminPanoramas() {
         </div>
       </div>
 
-      {/* Campus Tour Start picker */}
-      <div className="bg-yellow-50 border border-yellow-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center gap-3">
-        <div className="flex items-center gap-2">
-          <div className="w-9 h-9 bg-yellow-400 rounded-xl flex items-center justify-center">
-            <Compass size={18} className="text-blue-900" />
-          </div>
-          <div>
-            <p className="font-black text-yellow-900 text-sm">Campus Tour Start</p>
-            <p className="text-yellow-800 text-xs">Pick the panorama where the campus-wide guided tour begins (e.g. the Main Gate).</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 sm:ml-auto w-full sm:w-auto">
-          <select
-            value={startPanoId}
-            onChange={e => handleSaveStart(e.target.value)}
-            disabled={savingStart || panoramas.length === 0}
-            className="w-full sm:w-auto px-3 py-2 border-2 border-yellow-300 rounded-xl text-sm focus:border-yellow-500 focus:outline-none bg-white sm:min-w-[220px]"
-          >
-            <option value="">— None selected —</option>
-            {panoOptions.map(p => (
-              <option key={p.id} value={p.id}>
-                {p.buildingName ? `${p.buildingName} · ${p.name}` : p.name}
-              </option>
-            ))}
-          </select>
-          {savingStart && <div className="w-4 h-4 border-2 border-yellow-500/30 border-t-yellow-500 rounded-full animate-spin" />}
-        </div>
-      </div>
+
 
       {/* Form */}
       {showForm && (
