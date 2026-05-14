@@ -149,14 +149,12 @@ export const VirtualTourViewer: React.FC<VirtualTourViewerProps> = ({
   onExternalHotspotTarget,
   onNodeChange,
 }) => {
-  const shellRef = useRef<HTMLDivElement>(null);    // outer wrapper — fullscreen target
-  const containerRef = useRef<HTMLDivElement>(null); // PSV mounts here
+  const shellRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<Viewer | null>(null);
   const onNodeChangeRef = useRef(onNodeChange);
   useEffect(() => { onNodeChangeRef.current = onNodeChange; }, [onNodeChange]);
 
-  // Tracks whether we are currently in fullscreen (native or pseudo).
-  // Used to swap the Maximize2 / Minimize2 icon on the overlay button.
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const startId = useMemo(
@@ -172,7 +170,6 @@ export const VirtualTourViewer: React.FC<VirtualTourViewerProps> = ({
     [panoramas],
   );
 
-  // Shared resize helper — call after any layout change
   const resizeViewer = () => {
     const v = viewerRef.current;
     if (!v) return;
@@ -182,7 +179,6 @@ export const VirtualTourViewer: React.FC<VirtualTourViewerProps> = ({
     setTimeout(() => v.resize(), 250);
   };
 
-  // Sync the React fullscreen state from the DOM
   const syncFullscreenState = () => {
     const el = shellRef.current;
     setIsFullscreen(
@@ -190,7 +186,6 @@ export const VirtualTourViewer: React.FC<VirtualTourViewerProps> = ({
     );
   };
 
-  // Called by the overlay button
   const handleFullscreenToggle = () => {
     const el = shellRef.current;
     if (!el) return;
@@ -204,30 +199,16 @@ export const VirtualTourViewer: React.FC<VirtualTourViewerProps> = ({
   };
 
   // ── INIT ────────────────────────────────────────────────────────────────
-  // Creates the PSV viewer shell ONLY. No panorama, no setNodes.
-  //
-  // WHY no `panorama` in constructor + no setNodes here:
-  //   VirtualTourPlugin owns all panorama loading via setNodes(). Passing
-  //   `panorama` to constructor AND calling setNodes() creates a race that
-  //   leaves the first viewpoint permanently stuck on the loading spinner.
-  //   The NODES effect below runs in the same React batch (effects flush in
-  //   definition order), so there is no visible gap.
-  // ────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!containerRef.current || viewerRef.current) return;
 
     const viewer = new PsvViewer({
       container: containerRef.current,
-      // No `panorama` — VirtualTourPlugin manages all loading via setNodes().
-      loadingTxt: "Loading panorama…", // no external image request
-      // Single-finger drag on mobile (touchmoveTwoFingers: true shows
-      // the "Use two fingers to navigate" blocker overlay on iOS/Android).
+      loadingTxt: "Loading panorama…",
       touchmoveTwoFingers: false,
-      mousewheelCtrlKey: true, // desktop: Ctrl+scroll to zoom (avoids page-scroll conflict)
+      mousewheelCtrlKey: true,
       defaultYaw: "130deg",
       defaultZoomLvl: 50,
-      // The fullscreen button is handled by our React overlay below, so it is
-      // intentionally omitted from the PSV navbar to avoid duplicates.
       navbar: ["zoom", "move", "gallery", "caption"],
       plugins: [
         MarkersPlugin,
@@ -238,7 +219,8 @@ export const VirtualTourViewer: React.FC<VirtualTourViewerProps> = ({
             dataMode: "client",
             positionMode: "gps",
             renderMode: "3d",
-            preload: false,
+            // FIX 1: preload adjacent nodes in the background so switching is instant
+            preload: 1,
             showLinkTooltip: true,
           },
         ],
@@ -255,12 +237,10 @@ export const VirtualTourViewer: React.FC<VirtualTourViewerProps> = ({
     };
     vt.addEventListener("node-changed", onNodeChanged as any);
 
-    // Resize + sync icon on native fullscreen change (Android / desktop)
     const onFsChange = () => { resizeViewer(); syncFullscreenState(); };
     document.addEventListener("fullscreenchange", onFsChange);
     document.addEventListener("webkitfullscreenchange", onFsChange as EventListener);
 
-    // Escape key exits pseudo-fullscreen (desktop)
     const onEsc = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       const el = shellRef.current;
@@ -289,13 +269,9 @@ export const VirtualTourViewer: React.FC<VirtualTourViewerProps> = ({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Runs once on mount
+  }, []);
 
   // ── NODES ───────────────────────────────────────────────────────────────
-  // Calls setNodes when panorama content changes (and on first mount, since
-  // this effect runs in the same React batch as the INIT effect above).
-  // `panoramas` array identity is omitted — `serialized` is the stable proxy.
-  // ────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer) return;
@@ -346,12 +322,10 @@ export const VirtualTourViewer: React.FC<VirtualTourViewerProps> = ({
   }, [buildingName, lat, lng, serialized, startId, strictHotspotLinks]);
 
   // ── EXTERNAL NAV ────────────────────────────────────────────────────────
-  // Handles sidebar / viewpoint-list clicks.
-  //
-  // GUARD — `if (!current) return`:
-  //   On first mount this runs while the initial panorama is still loading
-  //   (getCurrentNode returns null). Without the guard, setCurrentNode would
-  //   interrupt that load, causing the first viewpoint to get stuck.
+  // FIX 2: If the viewer is still on its initial load (getCurrentNode returns
+  // null), don't silently bail — instead listen for the first node-changed
+  // event and navigate then. This fixes the race where clicking a viewpoint
+  // thumbnail before the first node has finished loading was silently dropped.
   // ────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -361,9 +335,26 @@ export const VirtualTourViewer: React.FC<VirtualTourViewerProps> = ({
     if (!vt) return;
 
     const current = vt.getCurrentNode?.();
-    if (!current) return; // initial load in progress — don't interrupt
-    if (current.id === activePanoId) return;
 
+    if (!current) {
+      // Initial node hasn't loaded yet — defer navigation until it does.
+      let handled = false;
+      const onFirstNode = (e: any) => {
+        if (handled) return;
+        handled = true;
+        // Only navigate away if the first node isn't already the desired one.
+        if (e?.node?.id !== activePanoId) {
+          void vt.setCurrentNode(activePanoId);
+        }
+      };
+      vt.addEventListener("node-changed", onFirstNode as any);
+      return () => {
+        handled = true;
+        vt.removeEventListener("node-changed", onFirstNode as any);
+      };
+    }
+
+    if (current.id === activePanoId) return;
     void vt.setCurrentNode(activePanoId);
   }, [activePanoId, serialized]);
 
@@ -376,19 +367,8 @@ export const VirtualTourViewer: React.FC<VirtualTourViewerProps> = ({
   }, [serialized]);
 
   return (
-    // shellRef is the fullscreen target. Needs to be the outermost element so
-    // our overlay button stays visible when the viewer goes fullscreen.
     <div ref={shellRef} className="absolute inset-0 bg-black">
-      {/* PSV mounts inside this div */}
       <div ref={containerRef} className="absolute inset-0" />
-
-      {/* ── Fullscreen overlay button ──────────────────────────────────────
-          Rendered by React so it works on iOS (where native fullscreen API
-          is unsupported) and is always visible regardless of PSV navbar state.
-          Position: top-right corner, above PSV's own UI (z-[9999]).
-          On Android/desktop this uses native fullscreen; on iOS it falls back
-          to pseudo-fullscreen (CSS fixed positioning via toggleTourImmersive).
-      ──────────────────────────────────────────────────────────────────── */}
       <button
         type="button"
         onClick={handleFullscreenToggle}

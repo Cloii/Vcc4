@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router";
 import { motion } from "motion/react";
 import { ArrowLeft, MapPin, Building2, ChevronRight, Camera, Lock, Info, PlusCircle } from "lucide-react";
@@ -7,7 +7,6 @@ import { useAuth } from "../context/AuthContext";
 import { PanoramaViewer } from "../components/tour/PanoramaViewer";
 import { VirtualTourViewer } from "../components/tour/VirtualTourViewer";
 
-// FIX #1: Use environment variable instead of hardcoded localhost
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || "";
 const resolveImageUrl = (url?: string) => {
   if (!url) return "";
@@ -15,9 +14,6 @@ const resolveImageUrl = (url?: string) => {
   return `${SERVER_URL}${url}`;
 };
 
-// FIX #2: Module-level cache so it persists across navigations and is never
-// re-fetched after the first successful load, no matter how many times the
-// user visits a tour page.
 let globalPanosCache: any[] | null = null;
 
 export default function TourDetail() {
@@ -32,6 +28,10 @@ export default function TourDetail() {
   const [currentPano, setCurrentPano] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [restricted, setRestricted] = useState(false);
+
+  // FIX: Track whether a viewpoint switch is in-flight so we don't queue
+  // multiple setCurrentNode calls while the first one is still loading.
+  const switchingRef = useRef(false);
 
   const buildingPanoIds = useMemo(() => new Set(panoramas.map((p) => p.id)), [panoramas]);
 
@@ -55,7 +55,6 @@ export default function TourDetail() {
     }).finally(() => setLoading(false));
   }, [buildingId, requestedPanoId]);
 
-  // Staff-only tours: depends on role resolving after mount — do not re-fetch building data when role changes
   useEffect(() => {
     if (!building) {
       setRestricted(false);
@@ -76,18 +75,16 @@ export default function TourDetail() {
     }).catch(() => {});
   }, [user?.id, buildingId, building?.name]);
 
-  // Prefetch all other panorama images in the background after current one loads
+  // Prefetch all panorama images in the background after current one loads
   useEffect(() => {
     if (panoramas.length <= 1) return;
     panoramas.forEach((pano) => {
-      if (pano.id === currentPano?.id) return; // skip current, already loading
+      if (pano.id === currentPano?.id) return;
       const img = new Image();
       img.src = resolveImageUrl(pano.imageUrl);
     });
   }, [panoramas, currentPano?.id]);
-  // FIX #2 (continued): Use the module-level cache instead of component state.
-  // This means a global panorama fetch is only ever made once per browser session,
-  // not once per tour page visit.
+
   const ensureAllPanos = async () => {
     if (globalPanosCache) return globalPanosCache;
     const all = await getPanoramas().catch(() => []);
@@ -96,18 +93,14 @@ export default function TourDetail() {
   };
 
   const jumpToPano = async (targetPanoId: string) => {
-    // If it exists in the current building, just switch.
     const local = panoramas.find((p) => p.id === targetPanoId);
     if (local) {
       setCurrentPano(local);
       return;
     }
-
-    // Otherwise, find it globally and navigate to its building tour page with ?pano=.
     const all = await ensureAllPanos();
     const target = all.find((p: any) => p.id === targetPanoId);
     if (!target?.buildingId) return;
-
     navigate(`/tours/${target.buildingId}?pano=${encodeURIComponent(targetPanoId)}`);
   };
 
@@ -116,10 +109,22 @@ export default function TourDetail() {
     if (user?.id) logActivity({ action: "hotspot_click", userId: user.id, buildingId, details: { targetPanoId } }).catch(() => {});
   };
 
+  // FIX: clear the switching lock when the VirtualTour confirms the node changed.
   const handleTourNodeChange = (panoId: string) => {
+    switchingRef.current = false;
     const target = panoramas.find(p => p.id === panoId);
     if (target) setCurrentPano(target);
     if (user?.id) logActivity({ action: "virtual_tour_node", userId: user.id, buildingId, details: { panoId } }).catch(() => {});
+  };
+
+  // Safe viewpoint switch — ignores clicks while a switch is already in-flight.
+  const switchToPano = (pano: any) => {
+    if (pano.id === currentPano?.id) return;
+    if (switchingRef.current) return; // debounce rapid clicks
+    switchingRef.current = true;
+    setCurrentPano(pano);
+    // Auto-clear the lock after 8 s in case node-changed never fires (error path).
+    setTimeout(() => { switchingRef.current = false; }, 8_000);
   };
 
   if (loading) return (
@@ -172,7 +177,6 @@ export default function TourDetail() {
       <div className="grid lg:grid-cols-3 gap-6">
         {/* Main viewer */}
         <div className="lg:col-span-2 space-y-4">
-          {/* Panorama Viewer */}
           <div className="h-80 md:h-[500px] rounded-2xl overflow-hidden shadow-2xl">
             {panoramas.length > 1 ? (
               <div className="relative h-full w-full">
@@ -182,6 +186,8 @@ export default function TourDetail() {
                   lat={building.lat}
                   panoramas={panoramas}
                   activePanoId={currentPano?.id}
+                  // FIX: pass startPanoId so deep-linked ?pano= opens the right node
+                  startPanoId={currentPano?.id}
                   onExternalHotspotTarget={(targetPanoId) => {
                     void jumpToPano(targetPanoId);
                   }}
@@ -196,7 +202,6 @@ export default function TourDetail() {
                 onHotspotClick={handleHotspotClick}
               />
             ) : (
-              // Fallback: show building image or a styled empty state
               <div className="h-full rounded-2xl overflow-hidden relative bg-gray-900">
                 {building?.imageUrl ? (
                   <>
@@ -244,17 +249,21 @@ export default function TourDetail() {
             )}
           </div>
 
-          {/* Panorama selector */}
+          {/* Panorama thumbnail selector */}
           {panoramas.length > 1 && (
             <div>
               <p className="text-sm font-bold text-gray-600 mb-2">📍 Viewpoints</p>
               <div className="flex gap-2 overflow-x-auto pb-2">
                 {panoramas.map(pano => (
-                      <button key={pano.id} onClick={() => {
-                        if (pano.id !== currentPano?.id) setCurrentPano(pano);
-                      }}      
-                     className={`flex-shrink-0 relative rounded-xl overflow-hidden border-2 transition-all ${
-                      currentPano?.id === pano.id ? "border-blue-600 ring-2 ring-blue-300" : "border-gray-200 hover:border-blue-300"
+                  <button
+                    key={pano.id}
+                    onClick={() => switchToPano(pano)}
+                    // FIX: visually disable the button while a switch is loading
+                    disabled={switchingRef.current && pano.id !== currentPano?.id}
+                    className={`flex-shrink-0 relative rounded-xl overflow-hidden border-2 transition-all ${
+                      currentPano?.id === pano.id
+                        ? "border-blue-600 ring-2 ring-blue-300"
+                        : "border-gray-200 hover:border-blue-300"
                     }`}
                     style={{ width: 100, height: 68 }}
                   >
@@ -262,6 +271,12 @@ export default function TourDetail() {
                     <div className="absolute inset-0 bg-black/30 flex items-end p-1">
                       <span className="text-white text-[10px] font-semibold leading-tight">{pano.name}</span>
                     </div>
+                    {/* Loading indicator overlay on the active thumbnail while switching */}
+                    {switchingRef.current && currentPano?.id === pano.id && (
+                      <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      </div>
+                    )}
                   </button>
                 ))}
               </div>
@@ -271,7 +286,6 @@ export default function TourDetail() {
 
         {/* Info Sidebar */}
         <div className="space-y-4">
-          {/* Building Info */}
           <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}
             className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5"
           >
@@ -289,7 +303,6 @@ export default function TourDetail() {
             <p className="text-gray-500 text-sm leading-relaxed">{building.description}</p>
           </motion.div>
 
-          {/* Navigation Guide */}
           <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 }}
             className="bg-blue-50 rounded-2xl border border-blue-100 p-4"
           >
@@ -302,7 +315,6 @@ export default function TourDetail() {
             </ul>
           </motion.div>
 
-          {/* Quick Actions */}
           <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 }}
             className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4"
           >
@@ -323,7 +335,6 @@ export default function TourDetail() {
             </div>
           </motion.div>
 
-          {/* All Panoramas list */}
           {panoramas.length > 0 && (
             <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.3 }}
               className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4"
@@ -331,16 +342,22 @@ export default function TourDetail() {
               <p className="font-bold text-gray-700 text-sm mb-3">All Viewpoints ({panoramas.length})</p>
               <div className="space-y-1.5">
                 {panoramas.map(pano => (
-                <button key={pano.id} onClick={() => {
-                  if (pano.id !== currentPano?.id) setCurrentPano(pano);
-                }}
+                  <button
+                    key={pano.id}
+                    onClick={() => switchToPano(pano)}
                     className={`w-full text-left flex items-center gap-2 px-3 py-2 rounded-xl text-sm transition-colors ${
                       currentPano?.id === pano.id ? "bg-blue-100 text-blue-700 font-semibold" : "hover:bg-gray-50 text-gray-600"
                     }`}
                   >
                     <Camera size={13} />
                     {pano.name}
-                    {currentPano?.id === pano.id && <span className="ml-auto text-xs text-blue-500">● Now</span>}
+                    {currentPano?.id === pano.id && (
+                      <span className="ml-auto text-xs text-blue-500 flex items-center gap-1">
+                        {switchingRef.current
+                          ? <span className="inline-block w-3 h-3 border border-blue-400 border-t-transparent rounded-full animate-spin" />
+                          : "● Now"}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
