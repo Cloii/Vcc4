@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from "react";
 import { supabase } from "../lib/supabaseClient";
 
 interface AuthUser {
@@ -28,12 +28,23 @@ export const authListenerPaused = { current: false };
 
 export const useAuth = () => useContext(AuthContext);
 
+/** Supabase can emit `session: null` briefly during token refresh — don't wipe auth until we confirm */
+const NULL_SESSION_DEBOUNCE_MS = 220;
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [role, setRole] = useState("public");
   const [loading, setLoading] = useState(true);
+  const nullSessionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const fetchRole = async (uid?: string) => {
+  const clearNullSessionTimer = () => {
+    if (nullSessionTimerRef.current) {
+      clearTimeout(nullSessionTimerRef.current);
+      nullSessionTimerRef.current = null;
+    }
+  };
+
+  const fetchRole = useCallback(async (uid?: string) => {
     try {
       const id = uid || (await supabase.auth.getUser()).data.user?.id;
       if (!id) {
@@ -53,49 +64,110 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch {
       setRole("student");
     }
-  };
+  }, []);
 
-  // On mount: restore Supabase session
+  // On mount: restore Supabase session + keep session aligned when the tab wakes from sleep / refresh
   useEffect(() => {
-    let unsub: any;
+    let unsub: { unsubscribe: () => void } | undefined;
+
+    const mapSessionUser = (
+      sUser: { id: string; email?: string | null; user_metadata?: Record<string, unknown> } | null,
+    ): AuthUser | null =>
+      sUser
+        ? {
+            id: sUser.id,
+            email: sUser.email || "",
+            name: (sUser.user_metadata as { name?: string } | undefined)?.name,
+          }
+        : null;
+
+    const applySessionUser = async (sUser: AuthUser) => {
+      setUser(sUser);
+      await fetchRole(sUser.id);
+    };
+
+    const scheduleNullSessionCheck = () => {
+      clearNullSessionTimer();
+      nullSessionTimerRef.current = setTimeout(async () => {
+        nullSessionTimerRef.current = null;
+        if (authListenerPaused.current) return;
+        const { data } = await supabase.auth.getSession();
+        const sUser = mapSessionUser(data.session?.user ?? null);
+        if (!sUser) {
+          setUser(null);
+          setRole("public");
+        } else {
+          await applySessionUser(sUser);
+        }
+      }, NULL_SESSION_DEBOUNCE_MS);
+    };
+
+    const syncFromStoredSession = async () => {
+      if (authListenerPaused.current) return;
+      const { data } = await supabase.auth.getSession();
+      const sUser = mapSessionUser(data.session?.user ?? null);
+      if (!sUser) return;
+      setUser(prev => (prev?.id === sUser.id ? prev : sUser));
+      await fetchRole(sUser.id);
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible") return;
+      void syncFromStoredSession();
+    };
+
+    const onResume = () => {
+      void syncFromStoredSession();
+    };
+
     (async () => {
       const { data } = await supabase.auth.getSession();
-      const sUser = data.session?.user;
+      const sUser = mapSessionUser(data.session?.user ?? null);
       if (sUser) {
-        setUser({ id: sUser.id, email: sUser.email || "", name: (sUser.user_metadata as any)?.name });
+        setUser(sUser);
         await fetchRole(sUser.id);
       } else {
         setUser(null);
         setRole("public");
       }
       setLoading(false);
+
       unsub = supabase.auth.onAuthStateChange(async (_evt, session) => {
-        // ✅ Skip if admin is in the middle of creating a new user via signUp fallback
         if (authListenerPaused.current) return;
         const u = session?.user;
         if (!u) {
-          setUser(null);
-          setRole("public");
+          scheduleNullSessionCheck();
           return;
         }
-        setUser({ id: u.id, email: u.email || "", name: (u.user_metadata as any)?.name });
-        await fetchRole(u.id);
+        clearNullSessionTimer();
+        const mapped = mapSessionUser(u);
+        if (mapped) await applySessionUser(mapped);
       }).data.subscription;
+
+      document.addEventListener("visibilitychange", onVisibility);
+      document.addEventListener("resume", onResume);
     })();
-    return () => unsub?.unsubscribe?.();
-  }, []);
+
+    return () => {
+      clearNullSessionTimer();
+      document.removeEventListener("visibilitychange", onVisibility);
+      document.removeEventListener("resume", onResume);
+      unsub?.unsubscribe();
+    };
+  }, [fetchRole]);
 
   const signIn = async (email: string, password: string) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
     const u = data.user;
     if (u) {
-      setUser({ id: u.id, email: u.email || "", name: (u.user_metadata as any)?.name });
+      setUser({ id: u.id, email: u.email || "", name: (u.user_metadata as { name?: string } | undefined)?.name });
       await fetchRole(u.id);
     }
   };
 
   const signOut = async () => {
+    clearNullSessionTimer();
     await supabase.auth.signOut();
     setUser(null);
     setRole("public");

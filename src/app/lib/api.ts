@@ -5,6 +5,12 @@ const unwrap = <T>(data: T | null, error: any): T => {
   return data as T;
 };
 
+/** List queries: never return null — avoids `.map` crashes if Supabase returns null `data` with no error */
+const unwrapRows = <T>(data: T[] | null | undefined, error: any): T[] => {
+  if (error) throw new Error(error.message || "Request failed");
+  return Array.isArray(data) ? data : [];
+};
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 // Single source of truth for mapping a raw DB building row to the app shape.
 // Previously duplicated identically in getBuildings() and getBuilding().
@@ -39,7 +45,7 @@ export const getMyRole = async () => {
 // Buildings
 export const getBuildings = async () => {
   const { data, error } = await supabase.from("buildings").select("*").order("name");
-  return unwrap<any[]>(data, error).map(mapBuilding);
+  return unwrapRows<any>(data, error).map(mapBuilding);
 };
 
 export const getBuilding = async (id: string) => {
@@ -96,7 +102,7 @@ export const getPanoramas = (buildingId?: string) =>
     let q = supabase.from("panoramas").select("*").order("sort_order").order("name");
     if (buildingId) q = q.eq("building_id", buildingId);
     const { data, error } = await q;
-    return unwrap<any[]>(data, error).map((p: any) => ({
+    return unwrapRows<any>(data, error).map((p: any) => ({
       id: p.id,
       buildingId: p.building_id,
       name: p.name,
@@ -155,7 +161,7 @@ export const reorderPanoramas = async (buildingId: string, orderedIds: string[])
 // Paths
 export const getPaths = async () => {
   const { data, error } = await supabase.from("paths").select("*").order("updated_at", { ascending: false });
-  return unwrap<any[]>(data, error).map((p: any) => ({
+  return unwrapRows<any>(data, error).map((p: any) => ({
     id: p.id,
     fromBuilding: p.from_building,
     toBuilding: p.to_building,
@@ -211,7 +217,7 @@ export const deletePath = async (id: string) => {
 // Resources
 export const getResources = async () => {
   const { data, error } = await supabase.from("resources").select("*").order("updated_at", { ascending: false });
-  return unwrap<any[]>(data, error).map((r: any) => ({
+  return unwrapRows<any>(data, error).map((r: any) => ({
     id: r.id,
     name: r.name,
     buildingId: r.building_id,
@@ -285,7 +291,7 @@ export const getActivityLogs = async () => {
     .select("*")
     .order("timestamp", { ascending: false })
     .limit(5000);
-  return unwrap<any[]>(data, error);
+  return unwrapRows<any>(data, error);
 };
 
 // Audit Logs
@@ -308,7 +314,7 @@ export const getSecurityAlerts = async () => {
     .from("security_alerts")
     .select("*")
     .order("timestamp", { ascending: false });
-  return unwrap<any[]>(data, error);
+  return unwrapRows<any>(data, error);
 };
 
 export const createSecurityAlert = async (data: any) => {
@@ -335,7 +341,7 @@ export const getUsers = async () => {
     .from("profiles")
     .select("id, name, email, role, created_at")
     .order("created_at", { ascending: false });
-  return unwrap<any[]>(data, error);
+  return unwrapRows<any>(data, error);
 };
 
 export const createUser = () => Promise.reject(new Error("Create users via Supabase Auth"));

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import { Link } from "react-router";
 import { motion } from "motion/react";
 import { Camera, BookOpen, Shield, Building2, ArrowRight, Star, Users } from "lucide-react";
@@ -54,6 +54,7 @@ const quickLinks = [
 
 export default function Landing() {
   const [content, setContent] = useState<LandingContent>(DEFAULT_CONTENT);
+  const preloadScheduled = useRef(false);
 
   // Stable particle positions — computed once on mount, never on re-render
   const particles = useMemo(() =>
@@ -68,21 +69,42 @@ export default function Landing() {
   // After content loads, silently preload all panorama images in the background.
   useEffect(() => {
     let mounted = true;
-    getLandingContent()
-      .then((r) => {
-        if (mounted && r?.content) {
+
+    const load = () => {
+      getLandingContent()
+        .then((r) => {
+          if (!mounted || !r?.content) return;
           setContent({ ...DEFAULT_CONTENT, ...r.content });
-        }
-      })
-      .catch(() => void 0)
-      .finally(() => {
-        // ↓ Fire-and-forget: starts downloading all panoramas silently.
-        // Uses a 2s delay so it doesn't compete with hero image loading.
-        if (mounted) {
-          setTimeout(() => preloadAllPanoramas(), 2000);
-        }
-      });
-    return () => { mounted = false; };
+        })
+        .catch(() => void 0)
+        .finally(() => {
+          if (!mounted) return;
+          if (!preloadScheduled.current) {
+            preloadScheduled.current = true;
+            setTimeout(() => preloadAllPanoramas(), 2000);
+          }
+        });
+    };
+
+    load();
+
+    const onVisible = () => {
+      if (document.visibilityState !== "visible" || !mounted) return;
+      load();
+    };
+    const onResume = () => {
+      if (!mounted) return;
+      load();
+    };
+
+    document.addEventListener("visibilitychange", onVisible);
+    document.addEventListener("resume", onResume);
+
+    return () => {
+      mounted = false;
+      document.removeEventListener("visibilitychange", onVisible);
+      document.removeEventListener("resume", onResume);
+    };
   }, []);
 
   return (

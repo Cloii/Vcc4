@@ -65,9 +65,6 @@ export default function MapPage() {
   const polylinesRef = useRef<L.Polyline[]>([]);
   const routePolylineRef = useRef<L.Polyline | null>(null);
 
-  // ✅ Abort ref for data fetch cleanup
-  const dataAbortRef = useRef<AbortController | null>(null);
-
   const [buildings, setBuildings] = useState<any[]>([]);
   const [paths, setPaths] = useState<any[]>([]);
   const [panoramas, setPanoramas] = useState<MapPanorama[]>([]);
@@ -102,41 +99,71 @@ export default function MapPage() {
     };
   }, []);
 
-  // ✅ Load data with abort cleanup
+  // ✅ Load map data; refetch when tab wakes (same recovery pattern as Tours/Directory)
   useEffect(() => {
-    dataAbortRef.current = new AbortController();
+    let cancelled = false;
+    let loadSeq = 0;
 
-    Promise.all([
-      getBuildings(),
-      getPaths(),
-      getPanoramas().catch(() => []),
-    ]).then(([b, p, panos]) => {
-      if (dataAbortRef.current?.signal.aborted) return;
+    const load = () => {
+      const seq = ++loadSeq;
+      Promise.all([
+        getBuildings(),
+        getPaths(),
+        getPanoramas().catch(() => []),
+      ])
+        .then(([b, p, panos]) => {
+          if (cancelled || seq !== loadSeq) return;
+          setBuildings(Array.isArray(b) ? b : []);
 
-      setBuildings(b);
+          const pathsRaw = Array.isArray(p) ? p : [];
+          const normalizedPaths = pathsRaw.map((path: any) => ({
+            ...path,
+            fromBuilding: path.from_building ?? path.fromBuilding,
+            toBuilding: path.to_building ?? path.toBuilding,
+          }));
+          setPaths(normalizedPaths);
 
-      // ✅ Normalize snake_case from Supabase → camelCase for path rendering
-      const normalizedPaths = (p as any[]).map(path => ({
-        ...path,
-        fromBuilding: path.from_building ?? path.fromBuilding,
-        toBuilding: path.to_building ?? path.toBuilding,
-      }));
-      setPaths(normalizedPaths);
+          const panoRaw = Array.isArray(panos) ? panos : [];
+          const normalizedPanos = panoRaw.map((pano: any) => ({
+            ...pano,
+            buildingId: pano.building_id ?? pano.buildingId,
+            imageUrl: pano.image_url ?? pano.imageUrl,
+          }));
+          setPanoramas(normalizedPanos as MapPanorama[]);
+        })
+        .catch((err) => {
+          if (cancelled || seq !== loadSeq) return;
+          if (err?.name !== "AbortError") console.error(err);
+        });
+    };
 
-      // ✅ Normalize panoramas snake_case too
-      const normalizedPanos = (panos as any[]).map(pano => ({
-        ...pano,
-        buildingId: pano.building_id ?? pano.buildingId,
-        imageUrl: pano.image_url ?? pano.imageUrl,
-      }));
-      setPanoramas(normalizedPanos as MapPanorama[]);
-    }).catch((err) => {
-      if (err?.name !== "AbortError") console.error(err);
-    });
+    load();
 
-    // ✅ Cleanup on unmount
+    const onVisible = () => {
+      if (document.hidden || cancelled) return;
+      load();
+    };
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted && !cancelled) load();
+    };
+    const onOnline = () => {
+      if (!cancelled) load();
+    };
+    const onResume = () => {
+      if (!cancelled) load();
+    };
+
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("pageshow", onPageShow);
+    window.addEventListener("online", onOnline);
+    document.addEventListener("resume", onResume);
+
     return () => {
-      dataAbortRef.current?.abort();
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("pageshow", onPageShow);
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("resume", onResume);
     };
   }, []);
 
@@ -182,8 +209,8 @@ export default function MapPage() {
     if (mapRef.current) {
       mapRef.current.setView([building.lat, building.lng], 18, { animate: true });
     }
-    if (user) logActivity({ action: "building_view", userId: user.id, buildingId: building.id }).catch(() => {});
-  }, [user]);
+    if (user?.id) logActivity({ action: "building_view", userId: user.id, buildingId: building.id }).catch(() => {});
+  }, [user?.id]);
 
   const handlePanoSelect = useCallback(
     (pano: MapPanorama) => {
@@ -193,7 +220,7 @@ export default function MapPage() {
       if (b && mapRef.current) {
         mapRef.current.setView([b.lat, b.lng], 18, { animate: true });
       }
-      if (user) {
+      if (user?.id) {
         logActivity({
           action: "pano_search_select",
           userId: user.id,
@@ -202,11 +229,11 @@ export default function MapPage() {
         }).catch(() => {});
       }
     },
-    [buildings, user]
+    [buildings, user?.id]
   );
 
   const startGuidedTourTo = (panoId: string) => {
-    if (user) {
+    if (user?.id) {
       logActivity({
         action: "guided_tour_start",
         userId: user.id,
@@ -303,7 +330,7 @@ export default function MapPage() {
     try {
       const result = await getRoute(fromBuilding, toBuilding, accessible);
       setRouteResult(result);
-      if (user) logActivity({ action: "route_search", userId: user.id, details: { from: fromBuilding, to: toBuilding } }).catch(() => {});
+      if (user?.id) logActivity({ action: "route_search", userId: user.id, details: { from: fromBuilding, to: toBuilding } }).catch(() => {});
     } catch (e: any) {
       setRouteResult({ found: false, error: e.message });
     } finally {

@@ -36,42 +36,77 @@ export default function CampusTour() {
   const [routeLoading, setRouteLoading] = useState(false);
 
   // ✅ Abort refs for cleanup
-  const dataAbortRef = useRef<AbortController | null>(null);
   const routeAbortRef = useRef<AbortController | null>(null);
 
-  // ✅ Fetch panoramas + buildings once
+  // ✅ Fetch panoramas + buildings; refetch when tab wakes (discard / throttled fetch recovery)
   useEffect(() => {
-    dataAbortRef.current = new AbortController();
-    setLoading(true);
+    let cancelled = false;
+    let loadSeq = 0;
 
-    Promise.all([
-      getPanoramas(),
-      getBuildings(),
-      getCampusTourSettings().catch(() => ({ content: { startPanoId: null }, updatedAt: null })),
-    ])
-      .then(([p, b, s]) => {
-        if (dataAbortRef.current?.signal.aborted) return;
-        setPanos(p as Pano[]);
-        setBuildings(b as Building[]);
-        const sid = s?.content?.startPanoId || (p as Pano[])[0]?.id || null;
-        setStartPanoId(sid);
-        setActivePanoId(sid || undefined);
-      })
-      .catch((err) => {
-        if (err?.name !== "AbortError") console.error(err);
-      })
-      .finally(() => {
-        if (!dataAbortRef.current?.signal.aborted) setLoading(false);
-      });
+    const load = (showSpinner: boolean) => {
+      const seq = ++loadSeq;
+      if (showSpinner) setLoading(true);
 
-    if (user) logActivity({ action: "campus_tour_view", userId: user.id }).catch(() => {});
-
-    // ✅ Cleanup on unmount
-    return () => {
-      dataAbortRef.current?.abort();
-      routeAbortRef.current?.abort();
+      Promise.all([
+        getPanoramas(),
+        getBuildings(),
+        getCampusTourSettings().catch(() => ({ content: { startPanoId: null }, updatedAt: null })),
+      ])
+        .then(([p, b, s]) => {
+          if (cancelled || seq !== loadSeq) return;
+          setPanos(p as Pano[]);
+          setBuildings(b as Building[]);
+          const sid = s?.content?.startPanoId || (p as Pano[])[0]?.id || null;
+          setStartPanoId(sid);
+          setActivePanoId(sid || undefined);
+        })
+        .catch((err) => {
+          if (cancelled || seq !== loadSeq) return;
+          if (err?.name !== "AbortError") console.error(err);
+        })
+        .finally(() => {
+          if (cancelled || seq !== loadSeq) return;
+          setLoading(false);
+        });
     };
-  }, []); // ✅ Fetch once only
+
+    load(true);
+
+    const onVisible = () => {
+      if (document.hidden || cancelled) return;
+      load(false);
+    };
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted && !cancelled) load(false);
+    };
+    const onOnline = () => {
+      if (!cancelled) load(false);
+    };
+
+    const onResume = () => {
+      if (cancelled) return;
+      load(false);
+    };
+
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("pageshow", onPageShow);
+    window.addEventListener("online", onOnline);
+    document.addEventListener("resume", onResume);
+
+    return () => {
+      cancelled = true;
+      routeAbortRef.current?.abort();
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("pageshow", onPageShow);
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("resume", onResume);
+    };
+  }, []); // ✅ Not tied to `user` object identity
+
+  useEffect(() => {
+    if (!user?.id) return;
+    logActivity({ action: "campus_tour_view", userId: user.id }).catch(() => {});
+  }, [user?.id]);
 
   // ✅ Compute guided route when ?to= changes
   useEffect(() => {
@@ -225,7 +260,7 @@ export default function CampusTour() {
                 strictHotspotLinks
                 onNodeChange={(id) => {
                   setActivePanoId(id);
-                  if (user) logActivity({ action: "campus_tour_node", userId: user.id, details: { panoId: id } }).catch(() => {});
+                  if (user?.id) logActivity({ action: "campus_tour_node", userId: user.id, details: { panoId: id } }).catch(() => {});
                 }}
               />
             </div>

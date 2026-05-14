@@ -37,6 +37,7 @@ export default function TourDetail() {
 
   useEffect(() => {
     if (!buildingId) return;
+    setLoading(true);
     Promise.all([
       getBuilding(buildingId),
       getPanoramas(buildingId),
@@ -46,32 +47,44 @@ export default function TourDetail() {
       if (panos.length > 0) {
         const requested = requestedPanoId ? panos.find((p: any) => p.id === requestedPanoId) : null;
         setCurrentPano(requested || panos[0]);
-      }
-
-      // Check sensitivity
-      if (b.sensitivityLevel === "staff" && role !== "staff" && role !== "admin") {
-        setRestricted(true);
-      }
-
-      if (user) {
-        logActivity({ action: "tour_view", userId: user.id, buildingId, details: { buildingName: b.name } }).catch(() => {});
+      } else {
+        setCurrentPano(null);
       }
     }).catch(() => {
       // Server unavailable — show empty state gracefully
     }).finally(() => setLoading(false));
-  }, [buildingId, role, requestedPanoId]);
+  }, [buildingId, requestedPanoId]);
 
+  // Staff-only tours: depends on role resolving after mount — do not re-fetch building data when role changes
+  useEffect(() => {
+    if (!building) {
+      setRestricted(false);
+      return;
+    }
+    setRestricted(
+      building.sensitivityLevel === "staff" && role !== "staff" && role !== "admin",
+    );
+  }, [building, role]);
 
+  useEffect(() => {
+    if (!user?.id || !buildingId || !building?.name) return;
+    logActivity({
+      action: "tour_view",
+      userId: user.id,
+      buildingId,
+      details: { buildingName: building.name },
+    }).catch(() => {});
+  }, [user?.id, buildingId, building?.name]);
 
   // Prefetch all other panorama images in the background after current one loads
-useEffect(() => {
-  if (panoramas.length <= 1) return;
-  panoramas.forEach((pano) => {
-    if (pano.id === currentPano?.id) return; // skip current, already loading
-    const img = new Image();
-    img.src = resolveImageUrl(pano.imageUrl);
-  });
-}, [panoramas, currentPano?.id]);
+  useEffect(() => {
+    if (panoramas.length <= 1) return;
+    panoramas.forEach((pano) => {
+      if (pano.id === currentPano?.id) return; // skip current, already loading
+      const img = new Image();
+      img.src = resolveImageUrl(pano.imageUrl);
+    });
+  }, [panoramas, currentPano?.id]);
   // FIX #2 (continued): Use the module-level cache instead of component state.
   // This means a global panorama fetch is only ever made once per browser session,
   // not once per tour page visit.
@@ -100,13 +113,13 @@ useEffect(() => {
 
   const handleHotspotClick = (targetPanoId: string) => {
     void jumpToPano(targetPanoId);
-    if (user) logActivity({ action: "hotspot_click", userId: user.id, buildingId, details: { targetPanoId } }).catch(() => {});
+    if (user?.id) logActivity({ action: "hotspot_click", userId: user.id, buildingId, details: { targetPanoId } }).catch(() => {});
   };
 
   const handleTourNodeChange = (panoId: string) => {
     const target = panoramas.find(p => p.id === panoId);
     if (target) setCurrentPano(target);
-    if (user) logActivity({ action: "virtual_tour_node", userId: user.id, buildingId, details: { panoId } }).catch(() => {});
+    if (user?.id) logActivity({ action: "virtual_tour_node", userId: user.id, buildingId, details: { panoId } }).catch(() => {});
   };
 
   if (loading) return (

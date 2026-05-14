@@ -29,16 +29,75 @@ export default function Tours() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("all");
 
-  // FIX #2: Added `user` to dependency array so logActivity fires correctly
-  // when user loads after mount
+  // Load buildings once — do NOT depend on `user` object identity: Supabase
+  // `onAuthStateChange` (e.g. token refresh when the tab regains focus) calls
+  // `setUser({...})` with a new object each time, which would otherwise re-run
+  // this effect on every tab switch even though the account is unchanged.
   useEffect(() => {
-    getBuildings().then(setBuildings).catch(() => {}).finally(() => setLoading(false));
-    if (user) logActivity({ action: "tours_page_view", userId: user.id }).catch(() => {});
-  }, [user]);
+    let cancelled = false;
+
+    const load = (showSpinner: boolean) => {
+      if (showSpinner) setLoading(true);
+      getBuildings()
+        .then((list) => {
+          if (cancelled) return;
+          setBuildings(Array.isArray(list) ? list : []);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          if (import.meta.env.DEV) console.error("[Tours] getBuildings failed:", err);
+          if (showSpinner) setBuildings([]);
+        })
+        .finally(() => {
+          if (cancelled) return;
+          setLoading(false);
+        });
+    };
+
+    load(true);
+
+    const onVisible = () => {
+      if (document.hidden || cancelled) return;
+      // Recover when the tab wakes from sleep / discard / throttled background fetch
+      load(false);
+    };
+
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted && !cancelled) load(false);
+    };
+
+    const onOnline = () => {
+      if (!cancelled) load(false);
+    };
+
+    const onResume = () => {
+      if (cancelled) return;
+      load(false);
+    };
+
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("pageshow", onPageShow);
+    window.addEventListener("online", onOnline);
+    document.addEventListener("resume", onResume);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("pageshow", onPageShow);
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("resume", onResume);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (user?.id) logActivity({ action: "tours_page_view", userId: user.id }).catch(() => {});
+  }, [user?.id]);
 
   const filtered = buildings.filter(b => {
-    const matchSearch = b.name.toLowerCase().includes(search.toLowerCase()) ||
-      b.description?.toLowerCase().includes(search.toLowerCase());
+    const term = search.toLowerCase();
+    const matchSearch =
+      (b.name?.toLowerCase() ?? "").includes(term) ||
+      (b.description?.toLowerCase() ?? "").includes(term);
     const matchCat = category === "all" || b.category === category;
     return matchSearch && matchCat;
   });
@@ -110,7 +169,7 @@ export default function Tours() {
                   onMouseEnter={() => preloadBuildingPanoramas(b.id)}
                   // ↓ Also works on mobile (touch = intent to navigate)
                   onTouchStart={() => preloadBuildingPanoramas(b.id)}
-                  onClick={() => user && logActivity({ action: "tour_start", userId: user.id, buildingId: b.id }).catch(() => {})}
+                  onClick={() => user?.id && logActivity({ action: "tour_start", userId: user.id, buildingId: b.id }).catch(() => {})}
                 >
                   {/* Image */}
                   <div className="relative h-48 overflow-hidden">

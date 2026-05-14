@@ -82,7 +82,7 @@ export const SecurityMonitor: React.FC = () => {
       resolved: false,
       timestamp: new Date().toISOString(),
     }).catch(() => {});
-  }, [user, location.pathname]);
+  }, [user?.id, location.pathname]);
 
   // ── 1. getDisplayMedia interception ─────────────────────────────────────────
   // Patches the browser API so we know the instant screen-sharing is started.
@@ -187,7 +187,7 @@ export const SecurityMonitor: React.FC = () => {
   // ── 5. Rapid navigation + page-view logging ──────────────────────────────────
   useEffect(() => {
     // Always log every page view for the audit trail
-    if (user) {
+    if (user?.id) {
       logActivity({
         action: "page_view",
         userId: user.id,
@@ -200,7 +200,7 @@ export const SecurityMonitor: React.FC = () => {
     navTimestamps.current.push(now);
     navTimestamps.current = navTimestamps.current.filter(t => now - t < 10_000);
 
-    if (navTimestamps.current.length > 8 && user) {
+    if (navTimestamps.current.length > 8 && user?.id) {
       fireAlert(
         "rapid_navigation",
         `Rapid navigation detected: ${navTimestamps.current.length} page changes in 10 s`,
@@ -209,7 +209,7 @@ export const SecurityMonitor: React.FC = () => {
         { count: navTimestamps.current.length },
       );
     }
-  }, [location.pathname, user, fireAlert]);
+  }, [location.pathname, user?.id, fireAlert]);
 
   return null; // this component renders nothing — it's a passive monitor
 };

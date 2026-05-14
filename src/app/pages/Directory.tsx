@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
 import { Search, Filter, Phone, Clock, MapPin, BookOpen, Building2, ChevronRight, X } from "lucide-react";
@@ -21,33 +21,67 @@ export default function Directory() {
   const [category, setCategory] = useState("all");
   const [selected, setSelected] = useState<any>(null);
 
-  // ✅ Abort controller ref for cleanup
-  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = (showSpinner: boolean) => {
+      if (showSpinner) setLoading(true);
+      Promise.all([getResources(), getBuildings()])
+        .then(([r, b]) => {
+          if (cancelled) return;
+          setResources(Array.isArray(r) ? r : []);
+          setBuildings(Array.isArray(b) ? b : []);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          if (err?.name !== "AbortError") console.error(err);
+          if (showSpinner) {
+            setResources([]);
+            setBuildings([]);
+          }
+        })
+        .finally(() => {
+          if (cancelled) return;
+          setLoading(false);
+        });
+    };
+
+    load(true);
+
+    const onVisible = () => {
+      if (document.hidden || cancelled) return;
+      load(false);
+    };
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted && !cancelled) load(false);
+    };
+    const onOnline = () => {
+      if (!cancelled) load(false);
+    };
+
+    const onResume = () => {
+      if (cancelled) return;
+      load(false);
+    };
+
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("pageshow", onPageShow);
+    window.addEventListener("online", onOnline);
+    document.addEventListener("resume", onResume);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("pageshow", onPageShow);
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("resume", onResume);
+    };
+  }, []); // ✅ Not tied to `user` object identity
 
   useEffect(() => {
-    abortRef.current = new AbortController();
-
-    Promise.all([getResources(), getBuildings()])
-      .then(([r, b]) => {
-        if (abortRef.current?.signal.aborted) return;
-        setResources(r);
-        setBuildings(b);
-      })
-      .catch((err) => {
-        if (err?.name !== "AbortError") console.error(err);
-      })
-      .finally(() => {
-        if (!abortRef.current?.signal.aborted) setLoading(false);
-      });
-
-    // ✅ Log activity only once, don't re-run on user change
-    if (user) logActivity({ action: "directory_view", userId: user.id }).catch(() => {});
-
-    // ✅ Cleanup on unmount
-    return () => {
-      abortRef.current?.abort();
-    };
-  }, []); // ✅ Empty deps — fetch once only
+    if (!user?.id) return;
+    logActivity({ action: "directory_view", userId: user.id }).catch(() => {});
+  }, [user?.id]);
 
   const filtered = resources.filter(r => {
     const term = search.toLowerCase();
@@ -125,7 +159,7 @@ export default function Directory() {
                     <button
                       onClick={() => {
                         setSelected(selected?.id === r.id ? null : r);
-                        if (user) logActivity({ action: "resource_view", userId: user.id, details: { resourceId: r.id } }).catch(() => {});
+                        if (user?.id) logActivity({ action: "resource_view", userId: user.id, details: { resourceId: r.id } }).catch(() => {});
                       }}
                       className={`w-full text-left bg-white rounded-xl border-2 transition-all p-4 hover:shadow-md ${
                         selected?.id === r.id ? "border-blue-500 shadow-md" : "border-gray-100 hover:border-blue-200"
