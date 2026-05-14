@@ -9,6 +9,7 @@ import {
   getCampusTourSettings, updateCampusTourSettings,
   SERVER_URL,
 } from "../../lib/api";
+import { invalidatePanoramasCache } from "../TourDetail";
 import { reorderPanoramas } from "../../lib/api";
 import { HotspotEditor, type EditableHotspot } from "../../components/admin/HotspotEditor";
 
@@ -255,6 +256,7 @@ export default function AdminPanoramas() {
         // ✅ FIX: generate a UUID client-side so the DB "id NOT NULL" constraint is satisfied
         await createPanorama({ ...form, id: crypto.randomUUID() });
       }
+      invalidatePanoramasCache(); // Clear cache so cross-building hotspots see new/updated panoramas
       setShowForm(false);
       setEditingId(null);
       setForm({ ...defaultForm });

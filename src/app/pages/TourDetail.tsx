@@ -21,7 +21,12 @@ const resolveImageUrl = (url?: string) => {
 };
 
 let globalPanosCache: { data: any[]; ts: number } | null = null;
-const PANOS_CACHE_TTL_MS = 60_000; // 1 minute TTL
+const PANOS_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+
+// Clear cache when panoramas are updated in admin panel
+export const invalidatePanoramasCache = () => {
+  globalPanosCache = null;
+};
 
 // Detect low-end devices to fall back to 2D rendering in VirtualTourViewer.
 // Exported so VirtualTourViewer can import it too.
