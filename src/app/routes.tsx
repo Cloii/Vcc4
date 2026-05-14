@@ -12,7 +12,6 @@ import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import NotFound from "./pages/NotFound";
 import AdminDashboard from "./pages/admin/Dashboard";
-import AdminPaths from "./pages/admin/Paths";
 import AdminBuildings from "./pages/admin/Buildings";
 import AdminResources from "./pages/admin/Resources";
 import AdminAnalytics from "./pages/admin/Analytics";
@@ -61,7 +60,6 @@ export const router = createBrowserRouter([
         Component: AdminLayout,
         children: [
           { index: true, Component: AdminDashboard },
-          { path: "paths", Component: AdminPaths },
           { path: "buildings", Component: AdminBuildings },
           { path: "panoramas", Component: AdminPanoramas },
           { path: "resources", Component: AdminResources },

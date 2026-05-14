@@ -13,7 +13,6 @@ import { SecurityMonitor } from "../security/SecurityMonitor";
 const sidebarLinks = [
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard, exact: true },
   { to: "/admin/landing", label: "Landing Page", icon: Home },
-  { to: "/admin/paths", label: "Path Management", icon: Map },
   { to: "/admin/buildings", label: "Buildings", icon: Building2 },
   { to: "/admin/panoramas", label: "Panoramas (360°)", icon: Camera },
   { to: "/admin/resources", label: "Resources", icon: BookOpen },

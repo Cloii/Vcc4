@@ -6,12 +6,11 @@ import {
   TrendingUp, Eye, Route, Server, Database, CheckCircle2, ClipboardList,
   RefreshCw, Wifi, WifiOff, Clock,
 } from "lucide-react";
-import { getAnalytics, getBuildings, getPaths, getResources, getSecurityAlerts, getUsers } from "../../lib/api";
+import { getAnalytics, getBuildings, getResources, getSecurityAlerts, getUsers } from "../../lib/api";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface Stats {
   buildings: number;
-  paths: number;
   resources: number;
   users: number;
   alerts: number;
@@ -85,7 +84,7 @@ const REFRESH_INTERVAL = 30_000; // 30 s
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 export default function AdminDashboard() {
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
-  const [stats, setStats] = useState<Stats>({ buildings: 0, paths: 0, resources: 0, users: 0, alerts: 0 });
+  const [stats, setStats] = useState<Stats>({ buildings: 0, resources: 0, users: 0, alerts: 0 });
   const [recentAlerts, setRecentAlerts] = useState<any[]>([]);
 
   // ✅ Three loading states: initial skeleton, background refresh, alerts
@@ -104,10 +103,9 @@ export default function AdminDashboard() {
     try {
       if (!isBackground) setAlertsLoading(true);
 
-      const [analyticsData, buildings, paths, resources, users, alerts] = await Promise.all([
+      const [analyticsData, buildings, resources, users, alerts] = await Promise.all([
         getAnalytics(),
         getBuildings(),
-        getPaths(),
         getResources(),
         getUsers().catch(() => [] as any[]),
         getSecurityAlerts().catch(() => [] as any[]),
@@ -118,7 +116,6 @@ export default function AdminDashboard() {
       setAnalytics(analyticsData);
       setStats({
         buildings: buildings.length,
-        paths: paths.length,
         resources: resources.length,
         users: users.length,
         alerts: alerts.filter((a: any) => !a.resolved).length,
@@ -303,7 +300,7 @@ export default function AdminDashboard() {
       {/* ── Stats Grid ──────────────────────────────────────────────────────── */}
       <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         <StatCard icon={Building2} label="Buildings"     value={stats.buildings} color="bg-blue-600"   link="/admin/buildings" />
-        <StatCard icon={Map}       label="Campus Paths"  value={stats.paths}     color="bg-green-600"  link="/admin/paths" />
+
         <StatCard icon={BookOpen}  label="Resources"     value={stats.resources} color="bg-purple-600" link="/admin/resources" />
         <StatCard icon={Users}     label="Users"         value={stats.users}     color="bg-orange-500" link="/admin/users" />
         <StatCard
@@ -399,7 +396,7 @@ export default function AdminDashboard() {
         <h3 className="font-black text-gray-800 mb-4">Quick Actions</h3>
         <div className="grid sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
           {[
-            { label: "Manage Paths",  icon: Route,         to: "/admin/paths",     color: "from-green-500 to-green-700" },
+
             { label: "Add Building",  icon: Building2,     to: "/admin/buildings", color: "from-blue-500 to-blue-700" },
             { label: "View Analytics",icon: BarChart3,     to: "/admin/analytics", color: "from-purple-500 to-purple-700" },
             { label: "Security Logs", icon: Shield,        to: "/admin/security",  color: "from-red-500 to-red-700" },
