@@ -21,14 +21,10 @@ const AuthContext = createContext<AuthContextType>({
   signIn: async () => {}, signOut: async () => {}, refreshRole: async () => {},
 });
 
-// ✅ Module-level flag: set to true to pause the auth listener during admin user creation.
-// This prevents onAuthStateChange from reacting to the temporary signUp session change
-// and redirecting the admin away from the dashboard.
 export const authListenerPaused = { current: false };
 
 export const useAuth = () => useContext(AuthContext);
 
-/** Supabase can emit `session: null` briefly during token refresh — don't wipe auth until we confirm */
 const NULL_SESSION_DEBOUNCE_MS = 220;
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -47,10 +43,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const fetchRole = useCallback(async (uid?: string) => {
     try {
       const id = uid || (await supabase.auth.getUser()).data.user?.id;
-      if (!id) {
-        setRole("public");
-        return;
-      }
+      if (!id) { setRole("public"); return; }
       const { data, error } = await supabase.from("profiles").select("name, role, email, id").eq("id", id).single();
       if (error) throw error;
       setRole(data?.role || "student");
@@ -66,26 +59,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
-  // On mount: restore Supabase session + keep session aligned when the tab wakes from sleep / refresh
   useEffect(() => {
     let unsub: { unsubscribe: () => void } | undefined;
 
     const mapSessionUser = (
       sUser: { id: string; email?: string | null; user_metadata?: Record<string, unknown> } | null,
     ): AuthUser | null =>
-      sUser
-        ? {
-            id: sUser.id,
-            email: sUser.email || "",
-            name: (sUser.user_metadata as { name?: string } | undefined)?.name,
-          }
-        : null;
+      sUser ? { id: sUser.id, email: sUser.email || "", name: (sUser.user_metadata as { name?: string } | undefined)?.name } : null;
 
     const applySessionUser = async (sUser: AuthUser) => {
       setUser(sUser);
       await fetchRole(sUser.id);
     };
 
+    // ✅ Already safe — Supabase calls are inside setTimeout (220ms),
+    // which escapes the onAuthStateChange lock before executing.
     const scheduleNullSessionCheck = () => {
       clearNullSessionTimer();
       nullSessionTimerRef.current = setTimeout(async () => {
@@ -93,12 +81,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (authListenerPaused.current) return;
         const { data } = await supabase.auth.getSession();
         const sUser = mapSessionUser(data.session?.user ?? null);
-        if (!sUser) {
-          setUser(null);
-          setRole("public");
-        } else {
-          await applySessionUser(sUser);
-        }
+        if (!sUser) { setUser(null); setRole("public"); }
+        else { await applySessionUser(sUser); }
       }, NULL_SESSION_DEBOUNCE_MS);
     };
 
@@ -116,33 +100,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       void syncFromStoredSession();
     };
 
-    const onResume = () => {
-      void syncFromStoredSession();
-    };
+    const onResume = () => { void syncFromStoredSession(); };
 
     (async () => {
       const { data } = await supabase.auth.getSession();
       const sUser = mapSessionUser(data.session?.user ?? null);
-      if (sUser) {
-        setUser(sUser);
-        await fetchRole(sUser.id);
-      } else {
-        setUser(null);
-        setRole("public");
-      }
+      if (sUser) { setUser(sUser); await fetchRole(sUser.id); }
+      else { setUser(null); setRole("public"); }
       setLoading(false);
 
-      unsub = supabase.auth.onAuthStateChange(async (_evt, session) => {
-        if (authListenerPaused.current) return;
-        const u = session?.user;
-        if (!u) {
-          scheduleNullSessionCheck();
-          return;
+      unsub = supabase.auth.onAuthStateChange(
+        // ✅ FIX: callback is NOT async.
+        // Previously: async (_evt, session) => { ... await applySessionUser() }
+        // The async keyword + awaiting a Supabase call inside this handler
+        // causes a deadlock in supabase-js that silently freezes ALL subsequent
+        // Supabase calls until the page is refreshed. This is a known bug:
+        // https://github.com/supabase/auth-js/issues/762
+        //
+        // Fix: remove async, wrap any Supabase work in setTimeout(, 0) so it
+        // runs after the handler returns and the internal lock is released.
+        (_evt, session) => {
+          if (authListenerPaused.current) return;
+          const u = session?.user;
+
+          if (!u) {
+            // scheduleNullSessionCheck is already safe — its Supabase calls
+            // run inside a 220ms setTimeout, outside the lock.
+            scheduleNullSessionCheck();
+            return;
+          }
+
+          clearNullSessionTimer();
+          const mapped = mapSessionUser(u);
+
+          if (mapped) {
+            // ✅ setTimeout(, 0) defers execution to after the handler returns,
+            // releasing the internal Supabase lock before fetchRole runs.
+            setTimeout(() => { void applySessionUser(mapped); }, 0);
+          }
         }
-        clearNullSessionTimer();
-        const mapped = mapSessionUser(u);
-        if (mapped) await applySessionUser(mapped);
-      }).data.subscription;
+      ).data.subscription;
 
       document.addEventListener("visibilitychange", onVisibility);
       document.addEventListener("resume", onResume);
