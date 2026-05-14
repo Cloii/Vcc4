@@ -11,11 +11,41 @@ import {
   isPseudoFullscreen,
   toggleTourImmersive,
 } from "../../lib/domFullscreen";
+import { isLowEndDevice } from "../../pages/TourDetail";
 
 import "@photo-sphere-viewer/core/index.css";
 import "@photo-sphere-viewer/markers-plugin/index.css";
 import "@photo-sphere-viewer/gallery-plugin/index.css";
 import "@photo-sphere-viewer/virtual-tour-plugin/index.css";
+
+// ── BLOB CACHE ─────────────────────────────────────────────────────────────
+// Fetches each panorama image once, converts it to a local blob: URL, and
+// stores it here. PSV then loads from memory instead of re-fetching Supabase.
+// Blob URLs persist for the lifetime of the page session.
+const blobCache = new Map<string, string>(); // original URL → blob: URL
+const inflight = new Map<string, Promise<string>>(); // prevent duplicate fetches
+
+async function preloadAsBlob(url: string): Promise<string> {
+  if (blobCache.has(url)) return blobCache.get(url)!;
+  if (inflight.has(url)) return inflight.get(url)!;
+
+  const promise = fetch(url)
+    .then((r) => r.blob())
+    .then((blob) => {
+      const objectUrl = URL.createObjectURL(blob);
+      blobCache.set(url, objectUrl);
+      inflight.delete(url);
+      return objectUrl;
+    })
+    .catch(() => {
+      inflight.delete(url);
+      return url; // fallback to original URL on fetch error
+    });
+
+  inflight.set(url, promise);
+  return promise;
+}
+// ──────────────────────────────────────────────────────────────────────────
 
 type PanoHotspot = {
   x: number;
@@ -47,10 +77,17 @@ type VirtualTourViewerProps = {
 };
 
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || "";
-const resolveUrl = (url: string) => {
+
+const resolveUrl = (url: string): string => {
   if (!url) return "";
   if (url.startsWith("http")) return url;
   return `${SERVER_URL}${url}`;
+};
+
+// Returns the blob: URL if already cached, otherwise the original resolved URL.
+const resolveWithCache = (url: string): string => {
+  const resolved = resolveUrl(url);
+  return blobCache.get(resolved) ?? resolved;
 };
 
 const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
@@ -88,7 +125,10 @@ function buildNodes(
         id: `hs-${p.id}-${i}`,
         position: { yaw: `${yawDeg}deg`, pitch: `${pitchDeg}deg` },
         html: `
-          <button type="button"
+          <button
+            type="button"
+            id="hs-btn-${p.id}-${i}"
+            name="hs-btn-${p.id}-${i}"
             style="width:44px;height:44px;border-radius:999px;border:4px solid #fff;
                    background:#facc15;box-shadow:0 10px 25px rgba(0,0,0,0.35);
                    display:flex;align-items:center;justify-content:center;cursor:pointer;">
@@ -124,8 +164,9 @@ function buildNodes(
     return {
       id: p.id,
       name: p.name,
-      panorama: resolveUrl(p.imageUrl),
-      thumbnail: resolveUrl(p.imageUrl),
+      // Use blob: URL if cached — PSV sees a local resource with zero latency.
+      panorama: resolveWithCache(p.imageUrl),
+      thumbnail: resolveWithCache(p.imageUrl),
       caption: `${buildingName} · ${p.name}`,
       gps,
       panoData:
@@ -157,6 +198,10 @@ export const VirtualTourViewer: React.FC<VirtualTourViewerProps> = ({
 
   const [isFullscreen, setIsFullscreen] = useState(false);
 
+  // True once the first panorama blob is ready — viewer won't init until then
+  // so PSV never shows "Loading panorama…" on the very first node.
+  const [cacheReady, setCacheReady] = useState(false);
+
   const startId = useMemo(
     () =>
       (startPanoId && panoramas.some((p) => p.id === startPanoId) ? startPanoId : undefined) ??
@@ -169,6 +214,46 @@ export const VirtualTourViewer: React.FC<VirtualTourViewerProps> = ({
     () => panoramas.map((p) => `${p.id}|${p.name}|${p.imageUrl}`).join(";;"),
     [panoramas],
   );
+
+  // ── BLOB PRELOAD ─────────────────────────────────────────────────────────
+  // 1. Fetch the start panorama eagerly — viewer initialises the moment it lands.
+  // 2. Fetch remaining panoramas in the background staggered 400 ms apart so
+  //    they don't compete with the active pano download.
+  // 3. After each background blob lands, patch the PSV node so future switches
+  //    use the blob URL with zero network round-trip.
+  useEffect(() => {
+    if (panoramas.length === 0) return;
+
+    // Determine which pano the user will see first.
+    const startPano = panoramas.find((p) => p.id === startId) ?? panoramas[0];
+    const startUrl = resolveUrl(startPano.imageUrl);
+
+    // Eager fetch of the first panorama.
+    preloadAsBlob(startUrl).then(() => {
+      setCacheReady(true);
+    });
+
+    // Background fetch for all other panoramas.
+    panoramas.forEach((pano, i) => {
+      const url = resolveUrl(pano.imageUrl);
+      if (url === startUrl) return; // already being fetched eagerly
+      setTimeout(() => {
+        preloadAsBlob(url).then((blobUrl) => {
+          // Patch the live PSV node to use the blob URL.
+          const viewer = viewerRef.current;
+          if (!viewer) return;
+          const vt = viewer.getPlugin(VirtualTourPlugin);
+          if (!vt) return;
+          try {
+            (vt as any).updateNode?.(pano.id, { panorama: blobUrl, thumbnail: blobUrl });
+          } catch {
+            // updateNode unavailable — next setNodes call will use blob URLs.
+          }
+        });
+      }, i * 400);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serialized, startId]);
 
   const resizeViewer = () => {
     const v = viewerRef.current;
@@ -198,13 +283,16 @@ export const VirtualTourViewer: React.FC<VirtualTourViewerProps> = ({
     });
   };
 
-  // ── INIT ────────────────────────────────────────────────────────────────
+  // ── INIT ─────────────────────────────────────────────────────────────────
+  // Waits for cacheReady so the first panorama is already a local blob URL
+  // when PSV initialises — eliminating the "Loading panorama…" spinner entirely.
   useEffect(() => {
-    if (!containerRef.current || viewerRef.current) return;
+    if (!containerRef.current || viewerRef.current || !cacheReady) return;
 
     const viewer = new PsvViewer({
       container: containerRef.current,
-      loadingTxt: "Loading panorama…",
+      loadingTxt: "",   // suppress spinner text
+      loadingImg: "",   // suppress spinner image/circle — blob loads are instant
       touchmoveTwoFingers: false,
       mousewheelCtrlKey: true,
       defaultYaw: "130deg",
@@ -218,9 +306,12 @@ export const VirtualTourViewer: React.FC<VirtualTourViewerProps> = ({
           {
             dataMode: "client",
             positionMode: "gps",
-            renderMode: "3d",
-            // FIX 1: preload adjacent nodes in the background so switching is instant
-            preload: 1,
+            // Fall back to CSS sphere on low-end devices — no WebGL overhead.
+            renderMode: isLowEndDevice() ? "2d" : "3d",
+            // PSV also keeps 2 adjacent nodes warm in its own internal cache.
+            preload: 2,
+            // Short crossfade — feels snappy while still being smooth.
+            transitionDuration: 500,
             showLinkTooltip: true,
           },
         ],
@@ -269,9 +360,9 @@ export const VirtualTourViewer: React.FC<VirtualTourViewerProps> = ({
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [cacheReady]);
 
-  // ── NODES ───────────────────────────────────────────────────────────────
+  // ── NODES ────────────────────────────────────────────────────────────────
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer) return;
@@ -280,6 +371,7 @@ export const VirtualTourViewer: React.FC<VirtualTourViewerProps> = ({
     const markers = viewer.getPlugin(MarkersPlugin);
     if (!vt) return;
 
+    // buildNodes calls resolveWithCache — uses blob URLs for any already-fetched panos.
     const { nodes, markersByPanoId } = buildNodes(
       panoramas, buildingName, lng, lat, strictHotspotLinks,
     );
@@ -319,14 +411,9 @@ export const VirtualTourViewer: React.FC<VirtualTourViewerProps> = ({
       markers?.removeEventListener("select-marker", onSelectMarker as any);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buildingName, lat, lng, serialized, startId, strictHotspotLinks]);
+  }, [buildingName, cacheReady, lat, lng, serialized, startId, strictHotspotLinks]);
 
-  // ── EXTERNAL NAV ────────────────────────────────────────────────────────
-  // FIX 2: If the viewer is still on its initial load (getCurrentNode returns
-  // null), don't silently bail — instead listen for the first node-changed
-  // event and navigate then. This fixes the race where clicking a viewpoint
-  // thumbnail before the first node has finished loading was silently dropped.
-  // ────────────────────────────────────────────────────────────────────────
+  // ── EXTERNAL NAV ─────────────────────────────────────────────────────────
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer || !activePanoId) return;
@@ -337,12 +424,10 @@ export const VirtualTourViewer: React.FC<VirtualTourViewerProps> = ({
     const current = vt.getCurrentNode?.();
 
     if (!current) {
-      // Initial node hasn't loaded yet — defer navigation until it does.
       let handled = false;
       const onFirstNode = (e: any) => {
         if (handled) return;
         handled = true;
-        // Only navigate away if the first node isn't already the desired one.
         if (e?.node?.id !== activePanoId) {
           void vt.setCurrentNode(activePanoId);
         }
@@ -366,9 +451,33 @@ export const VirtualTourViewer: React.FC<VirtualTourViewerProps> = ({
     return () => clearTimeout(t);
   }, [serialized]);
 
+  // ── RENDER ───────────────────────────────────────────────────────────────
+  // Show a clean spinner while the first blob downloads.
+  // This replaces the jarring PSV "Loading panorama…" circle.
+  if (!cacheReady) {
+    return (
+      <div className="absolute inset-0 bg-gray-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin mx-auto mb-3" />
+          <p className="text-white/60 text-sm">Preparing panorama…</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div ref={shellRef} className="absolute inset-0 bg-black">
+      {/*
+        Suppress PSV's built-in "Loading…" overlay on node transitions.
+        Since all panoramas are pre-fetched as blob: URLs, the load is
+        near-instant and the overlay is just visual noise.
+      */}
+      <style>{`
+        .psv-loader-container { display: none !important; }
+      `}</style>
+
       <div ref={containerRef} className="absolute inset-0" />
+
       <button
         type="button"
         onClick={handleFullscreenToggle}
