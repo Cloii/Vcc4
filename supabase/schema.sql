@@ -56,7 +56,7 @@ create table if not exists public.buildings (
   lng double precision not null,
   description text,
   category text not null default 'academic',
-  sensitivity_level text not null default 'public' check (sensitivity_level in ('public','staff')),
+  sensitivity_level text not null default 'public' check (sensitivity_level in ('public','student','staff','admin')),
   image_url text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
