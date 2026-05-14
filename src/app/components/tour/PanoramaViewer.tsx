@@ -29,7 +29,6 @@ interface PanoramaViewerProps {
   onHotspotClick?: (targetPanoId: string) => void;
 }
 
-// FIX: Use env var instead of hardcoded localhost
 const SERVER_URL = import.meta.env.VITE_SERVER_URL || "";
 const resolveUrl = (url: string) => {
   if (!url) return "";
@@ -44,7 +43,6 @@ export const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
   const viewerRef = useRef<Viewer | null>(null);
   const markersRef = useRef<MarkersPlugin | null>(null);
   const panoramaLoadGenRef = useRef(0);
-  // Keep a stable ref to onHotspotClick so the init effect doesn't re-run when it changes
   const onHotspotClickRef = useRef(onHotspotClick);
   useEffect(() => { onHotspotClickRef.current = onHotspotClick; }, [onHotspotClick]);
 
@@ -57,7 +55,6 @@ export const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
 
   const resolvedUrl = useMemo(() => resolveUrl(imageUrl), [imageUrl]);
 
-  // Reset UI state when panorama URL changes
   useEffect(() => {
     setZoom(50);
     setLoaded(false);
@@ -80,9 +77,6 @@ export const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
     }
   }
 
-  // FIX: Init viewer WITH the first panorama immediately so there's no gap.
-  // Previously: viewer created with no panorama → second useEffect loads it → race condition.
-  // Now: viewer created with panorama → loads immediately on mount.
   useEffect(() => {
     if (!viewerContainerRef.current) return;
     if (viewerRef.current) return;
@@ -90,12 +84,13 @@ export const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
 
     const viewer = new Viewer({
       container: viewerContainerRef.current,
-      // Pass panorama on init so it starts loading immediately
       panorama: resolvedUrl,
       navbar: false,
       mousewheel: true,
       touchmoveTwoFingers: false,
       loadingTxt: "Loading 360° panorama…",
+      // Disable PSV's built-in move speed indicators / floor arrows
+      moveSpeed: 1,
       plugins: [
         MarkersPlugin.withConfig({ markers: [] }),
       ],
@@ -138,9 +133,8 @@ export const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Only runs once — panorama changes handled by the effect below
+  }, []);
 
-  // Load panorama when image URL changes (after initial mount)
   useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer) return;
@@ -151,9 +145,8 @@ export const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
       return;
     }
 
-    // Skip if this is the initial load (viewer was created with this URL already)
     const gen = ++panoramaLoadGenRef.current;
-    if (gen === 1) return; // First load handled by viewer constructor above
+    if (gen === 1) return;
 
     setLoaded(false);
     setImgError(false);
@@ -176,7 +169,6 @@ export const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
     };
   }, [resolvedUrl]);
 
-  // Hotspots → markers
   useEffect(() => {
     const markers = markersRef.current;
     if (!markers) return;
@@ -286,7 +278,17 @@ export const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
       ref={shellRef}
       className={`relative h-full overflow-hidden bg-black select-none ${immersive ? "" : "rounded-2xl"}`}
     >
-      {/* ── Panorama container ─────────────────────────────────────────────── */}
+      {/* ── Hide PSV's built-in floor/move arrows ── */}
+      <style>{`
+        .psv-move-arrow,
+        .psv-virtual-tour-link,
+        .psv-move-button,
+        [class*="psv-move"],
+        .psv-canvas-container canvas + div,
+        .psv-overlay { display: none !important; }
+      `}</style>
+
+      {/* ── Panorama container ── */}
       <div
         ref={viewerContainerRef}
         className="absolute inset-0"
@@ -322,7 +324,7 @@ export const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
           style={{ background: "linear-gradient(to top, rgba(0,0,0,0.55) 0%, transparent 100%)" }} />
       </div>
 
-      {/* ── Top Bar ────────────────────────────────────────────────────────── */}
+      {/* ── Top Bar ── */}
       <div className="absolute top-0 left-0 right-0 z-20 flex items-center justify-between px-4 py-3">
         <div className="bg-black/60 backdrop-blur-sm text-white px-3 py-1.5 rounded-lg flex items-center gap-2">
           <Info size={14} />
@@ -353,7 +355,7 @@ export const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
         </div>
       </div>
 
-      {/* ── Navigator arrows ─────────────────────────────────────────────── */}
+      {/* ── Navigator arrows ── */}
       <div className="absolute left-3 top-1/2 -translate-y-1/2 z-20">
         <button onClick={() => pan("left")} className="bg-black/60 backdrop-blur-sm text-white p-3 rounded-full hover:bg-yellow-500 hover:text-blue-900 transition-all shadow-lg">
           <ChevronLeft size={22} />
@@ -365,7 +367,7 @@ export const PanoramaViewer: React.FC<PanoramaViewerProps> = ({
         </button>
       </div>
 
-      {/* ── Drag hint ───────────────────────────────────────────────────── */}
+      {/* ── Drag hint ── */}
       <AnimatePresence>
         {showHint && loaded && !imgError && (
           <motion.div
